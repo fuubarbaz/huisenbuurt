@@ -1,0 +1,2853 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>WoonAgent</title>
+<!--
+  A deliberately build-free React app.
+
+  React and Babel come from a CDN and JSX is compiled in the browser. That is
+  slower than a bundled build and would be the wrong choice for something
+  public, but this is a personal tool served by your own FastAPI process: the
+  trade buys you no node_modules, no build step, and no second dev server. If
+  it grows past a few screens, move it to Vite — the component boundaries below
+  are already the ones you would keep.
+
+  The stylesheet is token-first: every colour, space, radius and type size is a
+  custom property, and components reference tokens rather than literals. That
+  is what makes the dark theme a fifteen-line override instead of a rewrite,
+  and it is why there are almost no inline styles left in the JSX below.
+-->
+<script>
+  /* Resolve the theme before first paint. Doing this in React would flash the
+     light palette on a dark-mode machine for one frame. */
+  (function () {
+    var saved = null;
+    try { saved = localStorage.getItem("woonagent.theme"); } catch (e) { /* blocked */ }
+    var mode = saved || "system";
+    var dark = mode === "dark" ||
+      (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  /* ---- tokens --------------------------------------------------------- */
+  :root {
+    /* surfaces and ink */
+    --bg: #f5f6f8;          --surface: #ffffff;     --surface-2: #f7f8fa;
+    --ink: #0f1319;         --ink-2: #39424f;       --muted: #6b7484;
+    --line: #e4e7ec;        --line-2: #d2d7df;
+
+    /* semantics */
+    --accent: #2563eb;      --accent-ink: #ffffff;  --accent-soft: #e9f0fe;
+    --good: #0d7f4c;        --good-soft: #e4f3ea;
+    --mid: #a96a06;         --mid-soft: #fbf0dc;
+    --bad: #c0362b;         --bad-soft: #fceceb;
+    --crit: #9c1d13;
+
+    /* type scale */
+    --fs-xs: 11.5px;  --fs-sm: 12.5px;  --fs-md: 13.5px;
+    --fs-base: 14.5px; --fs-lg: 17px;   --fs-xl: 21px;   --fs-display: 34px;
+
+    /* space scale */
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 22px; --s6: 30px; --s7: 44px;
+
+    /* shape */
+    --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+    --shadow-sm: 0 1px 2px rgba(15, 19, 25, .05);
+    --shadow-md: 0 4px 16px -6px rgba(15, 19, 25, .16), 0 1px 3px rgba(15, 19, 25, .05);
+
+    --header-h: 54px;
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0c0f15;          --surface: #141922;     --surface-2: #1a202b;
+    --ink: #e9edf4;         --ink-2: #b6c0cf;       --muted: #8b96a8;
+    --line: #232a36;        --line-2: #303948;
+
+    --accent: #74a2ff;      --accent-ink: #08101f;  --accent-soft: #17233a;
+    --good: #46c084;        --good-soft: #12291f;
+    --mid: #e0a33e;         --mid-soft: #2b2312;
+    --bad: #f0776a;         --bad-soft: #2d1715;
+    --crit: #ff8b7d;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-md: 0 6px 20px -8px rgba(0, 0, 0, .7), 0 1px 3px rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+
+  /* No-JS fallback; the head script normally sets data-theme before paint. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: #0c0f15; --surface: #141922; --surface-2: #1a202b;
+      --ink: #e9edf4; --ink-2: #b6c0cf; --muted: #8b96a8;
+      --line: #232a36; --line-2: #303948;
+      --accent: #74a2ff; --accent-ink: #08101f; --accent-soft: #17233a;
+      --good: #46c084; --mid: #e0a33e; --bad: #f0776a; --crit: #ff8b7d;
+      color-scheme: dark;
+    }
+  }
+
+  /* ---- base ----------------------------------------------------------- */
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: var(--fs-base)/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
+          Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  a { color: var(--accent); }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+  :focus:not(:focus-visible) { outline: none; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    html { scroll-behavior: auto !important; }
+  }
+  html { scroll-behavior: smooth; }
+
+  .skip {
+    position: absolute; left: -9999px; top: 0; background: var(--accent);
+    color: var(--accent-ink); padding: var(--s2) var(--s4); z-index: 50;
+    border-radius: 0 0 var(--r-md) 0;
+  }
+  .skip:focus { left: 0; }
+
+  /* ---- app bar -------------------------------------------------------- */
+  .appbar {
+    position: sticky; top: 0; z-index: 20;
+    /* Opaque, not a blurred translucent bar. backdrop-filter promotes the
+       header to its own compositing layer, which costs a repaint on every
+       scroll frame and renders unpredictably; the design does not need it. */
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .appbar-in {
+    max-width: 1240px; margin: 0 auto; padding: 0 var(--s4);
+    height: var(--header-h); display: flex; align-items: center; gap: var(--s5);
+  }
+  @media (max-width: 620px) { .appbar-in { gap: var(--s2); padding: 0 var(--s3); } }
+  .brand { display: flex; align-items: baseline; gap: var(--s2); margin-right: auto; }
+  .brand b { font-size: var(--fs-lg); letter-spacing: -.02em; font-weight: 650; white-space: nowrap; }
+  .brand span { color: var(--muted); font-size: var(--fs-sm); }
+  @media (max-width: 620px) { .brand span { display: none; } }
+
+  .tabs { display: flex; gap: var(--s1); }
+  .tab {
+    background: none; border: 0; font: inherit; font-size: var(--fs-md);
+    color: var(--muted); cursor: pointer; padding: var(--s2) var(--s3);
+    border-radius: var(--r-sm); transition: color .15s, background .15s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--ink); background: var(--surface-2); }
+  .tab[aria-selected="true"] { color: var(--ink); font-weight: 600; background: var(--surface); box-shadow: var(--shadow-sm); }
+
+  .icon-btn {
+    background: none; border: 1px solid var(--line); color: var(--muted);
+    width: 32px; height: 32px; border-radius: var(--r-sm); cursor: pointer;
+    display: grid; place-items: center; font-size: 15px; line-height: 1;
+    transition: color .15s, border-color .15s;
+  }
+  .icon-btn:hover { color: var(--ink); border-color: var(--line-2); }
+
+  /* ---- layout --------------------------------------------------------- */
+  .wrap { max-width: 1240px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7); }
+  .layout { display: block; }
+  @media (min-width: 1180px) {
+    .layout {
+      display: grid; grid-template-columns: 186px minmax(0, 1fr);
+      gap: var(--s6); align-items: start;
+    }
+  }
+  .lede { color: var(--muted); font-size: var(--fs-md); margin: 0 0 var(--s4); max-width: 62ch; }
+
+  /* ---- section rail (scroll-spy) -------------------------------------- */
+  .rail {
+    position: sticky; top: var(--header-h); z-index: 10;
+    display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    padding: var(--s2) var(--s4); margin: 0 calc(-1 * var(--s4)) var(--s4);
+  }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail-link {
+    flex: none; text-decoration: none; white-space: nowrap;
+    font-size: var(--fs-sm); color: var(--muted); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 11px;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .rail-link:hover { color: var(--ink); }
+  .rail-link.is-active {
+    color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
+    font-weight: 600;
+  }
+  @media (min-width: 1180px) {
+    .rail {
+      display: block; overflow: visible; background: none; border: 0;
+      border-left: 1px solid var(--line); padding: 0; margin: 0;
+      top: calc(var(--header-h) + var(--s5));
+    }
+    .rail-link {
+      display: block; border: 0; border-radius: 0; background: none;
+      padding: 5px var(--s3); margin-left: -1px;
+      border-left: 2px solid transparent;
+    }
+    .rail-link.is-active { background: none; border-left-color: var(--accent); }
+  }
+
+  /* ---- panels --------------------------------------------------------- */
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-lg); padding: var(--s5); margin-bottom: var(--s4);
+    box-shadow: var(--shadow-sm);
+    scroll-margin-top: calc(var(--header-h) * 2 + var(--s4));
+  }
+  @media (min-width: 1180px) { .panel { scroll-margin-top: calc(var(--header-h) + var(--s5)); } }
+  .panel > :last-child { margin-bottom: 0; }
+  .panel-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+  .panel-head h2 {
+    font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 600; margin: 0;
+  }
+  .scope {
+    font-size: var(--fs-xs); letter-spacing: .02em; text-transform: none; font-weight: 500;
+    color: var(--muted); background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r-pill); padding: 1px 8px;
+  }
+  .note { color: var(--muted); font-size: var(--fs-md); margin: var(--s2) 0 var(--s4); }
+  .note:last-child { margin-bottom: 0; }
+  .footnote {
+    color: var(--muted); font-size: var(--fs-sm); margin: var(--s4) 0 0;
+    padding-top: var(--s3); border-top: 1px dashed var(--line);
+  }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); font-size: var(--fs-md); padding: var(--s2) 0; }
+  code {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: 1px 5px; font-size: var(--fs-sm);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  /* ---- forms ---------------------------------------------------------- */
+  .seg {
+    display: inline-flex; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: 3px; margin-bottom: var(--s4); gap: 3px;
+  }
+  .seg button {
+    background: none; border: 0; font: inherit; font-size: var(--fs-md); cursor: pointer;
+    color: var(--muted); padding: 6px 14px; border-radius: 7px;
+    transition: background .15s, color .15s;
+  }
+  .seg button[aria-selected="true"] {
+    background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm);
+  }
+
+  .fields { display: grid; gap: var(--s3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (min-width: 760px) { .fields { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+  .span-2 { grid-column: span 2; }
+  .span-3, .span-4 { grid-column: span 2; }
+  @media (min-width: 760px) {
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+  }
+  .span-all { grid-column: 1 / -1; }
+  label { display: block; font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--s1); font-weight: 500; }
+  label em { font-style: normal; opacity: .65; font-weight: 400; }
+  input, select {
+    width: 100%; padding: 9px 11px; font: inherit; font-size: var(--fs-base); color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+    transition: border-color .15s, background .15s;
+  }
+  input:hover, select:hover { border-color: var(--line-2); }
+  input::placeholder { color: var(--muted); opacity: .7; }
+  .actions {
+    grid-column: 1 / -1; display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap;
+    margin-top: var(--s1);
+  }
+  .btn {
+    font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer;
+    border-radius: var(--r-sm); padding: 9px 18px; border: 1px solid transparent;
+    display: inline-flex; align-items: center; gap: var(--s2);
+    transition: filter .15s, background .15s, border-color .15s;
+  }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-ghost { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--line-2); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: var(--fs-sm); flex: 1 1 220px; min-width: 0; }
+
+  .spinner {
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    border: 2px solid currentColor; border-top-color: transparent;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- banners -------------------------------------------------------- */
+  .banner {
+    display: flex; gap: var(--s3); align-items: flex-start;
+    border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-md);
+    padding: var(--s3) var(--s4); margin-bottom: var(--s4); font-size: var(--fs-md);
+  }
+  .banner-bad { border-left-color: var(--bad); background: var(--bad-soft); color: var(--ink); }
+  .err { color: var(--bad); font-size: var(--fs-md); margin: var(--s3) 0 0; }
+
+  /* ---- verdict -------------------------------------------------------- */
+  .verdict { display: flex; gap: var(--s5); align-items: center; flex-wrap: wrap; }
+  .gauge { width: 108px; height: 108px; flex: none; }
+  .gauge-track { fill: none; stroke: var(--line); stroke-width: 9; }
+  .gauge-fill { fill: none; stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray .8s cubic-bezier(.2,.7,.2,1); }
+  .gauge-num { font-size: 30px; font-weight: 700; text-anchor: middle; letter-spacing: -.03em; }
+  .gauge-den { font-size: 11px; text-anchor: middle; fill: var(--muted); }
+  .verdict-id { min-width: 200px; flex: 1 1 240px; }
+  .addr { font-size: var(--fs-xl); font-weight: 650; letter-spacing: -.02em; line-height: 1.25; }
+  .facts { color: var(--muted); font-size: var(--fs-md); }
+  .facts-strong { color: var(--ink-2); }
+
+  .dims { margin-top: var(--s5); border-top: 1px solid var(--line); padding-top: var(--s4); }
+  .dim { display: grid; grid-template-columns: 1fr 46px; gap: var(--s2) var(--s3); align-items: center; }
+  @media (min-width: 620px) { .dim { grid-template-columns: 148px 1fr 46px; } }
+  .dim + .dim, .drivers + .dim { margin-top: var(--s3); }
+  .dim-name { font-size: var(--fs-md); font-weight: 500; }
+  .dim-weight { color: var(--muted); font-weight: 400; font-size: var(--fs-xs); }
+  .track { grid-column: 1 / -1; background: var(--line); border-radius: var(--r-pill); height: 7px; overflow: hidden; }
+  @media (min-width: 620px) { .track { grid-column: auto; } }
+  .fill { height: 100%; border-radius: var(--r-pill); transition: width .8s cubic-bezier(.2,.7,.2,1); }
+  .dim-val { text-align: right; font-size: var(--fs-md); font-weight: 600; }
+  .dim.is-imputed .dim-name, .dim.is-imputed .dim-val { color: var(--muted); font-weight: 400; }
+  .drivers { margin: var(--s2) 0 0; padding: 0 0 0 var(--s3); border-left: 2px solid var(--line); list-style: none; }
+  @media (min-width: 620px) { .drivers { margin-left: 148px; } }
+  .drivers li { color: var(--muted); font-size: var(--fs-sm); margin: 2px 0; }
+
+  .flags { margin-top: var(--s5); display: grid; gap: var(--s2); }
+  .flag {
+    display: flex; gap: var(--s3); align-items: flex-start; font-size: var(--fs-md);
+    border-radius: var(--r-md); padding: var(--s3); border: 1px solid var(--line);
+    border-left-width: 3px;
+  }
+  .flag.critical { border-left-color: var(--crit); background: var(--bad-soft); }
+  .flag.warn { border-left-color: var(--mid); background: var(--mid-soft); }
+  .flag.info { border-left-color: var(--accent); background: var(--accent-soft); }
+  .flag-sev {
+    flex: none; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em;
+    font-weight: 700; padding-top: 2px; width: 62px;
+  }
+  .flag.critical .flag-sev { color: var(--crit); }
+  .flag.warn .flag-sev { color: var(--mid); }
+  .flag.info .flag-sev { color: var(--accent); }
+
+  /* ---- guided fix callout ------------------------------------------------- */
+  .fixit {
+    border: 1px solid var(--accent); background: var(--accent-soft);
+    border-radius: var(--r-md); padding: var(--s4); margin-top: var(--s3);
+  }
+  .fixit-title { font-weight: 650; font-size: var(--fs-base); margin-bottom: var(--s2); }
+  .fixit ol { margin: var(--s2) 0 var(--s3); padding-left: 1.3em; }
+  .fixit li { margin: 4px 0; font-size: var(--fs-md); }
+  .fixit .actions { margin-top: 0; }
+
+  /* ---- address autocomplete ---------------------------------------------- */
+  .autocomplete { position: relative; }
+  .autocomplete-list {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+    background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r-md);
+    box-shadow: var(--shadow-md); max-height: 260px; overflow-y: auto; padding: 4px;
+  }
+  .autocomplete-item {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    font: inherit; font-size: var(--fs-base); color: var(--ink); cursor: pointer;
+    padding: 8px 10px; border-radius: var(--r-sm);
+  }
+  .autocomplete-item:hover, .autocomplete-item.is-active {
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .autocomplete-empty { padding: 8px 10px; font-size: var(--fs-sm); color: var(--muted); }
+
+  /* ---- weight sliders --------------------------------------------------- */
+  .tune {
+    margin-top: var(--s4); padding-top: var(--s4); border-top: 1px dashed var(--line);
+  }
+  .tune-head {
+    display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+    margin-bottom: var(--s3);
+  }
+  .tune-title { font-size: var(--fs-md); font-weight: 600; }
+  .link-btn {
+    background: none; border: 0; font: inherit; font-size: var(--fs-sm);
+    color: var(--accent); cursor: pointer; padding: 2px 4px; border-radius: var(--r-sm);
+  }
+  .link-btn:disabled { color: var(--muted); cursor: default; }
+  .sliders { display: grid; gap: var(--s3); }
+  .slider {
+    display: grid; grid-template-columns: 1fr 46px; gap: var(--s1) var(--s3);
+    align-items: center;
+  }
+  @media (min-width: 620px) { .slider { grid-template-columns: 148px 1fr 46px; } }
+  .slider label { margin: 0; font-size: var(--fs-md); color: var(--ink); font-weight: 500; }
+  .slider input[type="range"] {
+    grid-column: 1 / -1; width: 100%; padding: 0; background: none;
+    border: 0; accent-color: var(--accent); cursor: pointer;
+  }
+  @media (min-width: 620px) { .slider input[type="range"] { grid-column: auto; } }
+  .slider-pct {
+    text-align: right; font-size: var(--fs-md); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .slider.is-off label, .slider.is-off .slider-pct { color: var(--muted); font-weight: 400; }
+
+  /* ---- stats and rows ------------------------------------------------- */
+  .stats { display: flex; gap: var(--s6); flex-wrap: wrap; margin-bottom: var(--s4); }
+  .stat-v { font-size: var(--fs-display); font-weight: 700; letter-spacing: -.03em; line-height: 1.1; }
+  .stat-v.sm { font-size: var(--fs-xl); }
+  .stat-k { color: var(--muted); font-size: var(--fs-sm); margin-top: 2px; }
+
+  .cols { display: grid; gap: 0 var(--s6); grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 640px) { .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .colhead {
+    font-size: var(--fs-xs); color: var(--muted); text-transform: uppercase;
+    letter-spacing: .06em; font-weight: 600; margin-bottom: var(--s1);
+  }
+  .row {
+    display: flex; justify-content: space-between; gap: var(--s4);
+    padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--fs-md);
+  }
+  .row-k { color: var(--ink-2); min-width: 0; }
+  .row-v { font-weight: 600; white-space: nowrap; }
+  .src { font-style: normal; font-size: var(--fs-xs); color: var(--muted); opacity: .8; margin-left: 6px; }
+
+  /* ---- tables --------------------------------------------------------- */
+  .scroll-x { overflow-x: auto; margin: 0 calc(-1 * var(--s5)); padding: 0 var(--s5); }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+  th {
+    text-align: left; font-size: var(--fs-xs); color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .05em; padding: 0 var(--s2) var(--s2);
+  }
+  td { padding: 10px var(--s2); border-top: 1px solid var(--line); vertical-align: top; }
+  .num { text-align: right; white-space: nowrap; }
+  .pill {
+    display: inline-block; min-width: 38px; text-align: center; padding: 3px 9px;
+    border-radius: var(--r-pill); font-weight: 700; font-size: var(--fs-sm); color: #fff;
+  }
+  tbody tr { transition: background .12s; }
+  tbody tr:hover { background: var(--surface-2); }
+
+  /* ---- crime cells ---------------------------------------------------- */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); gap: var(--s3); }
+  .metric {
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: var(--s3) var(--s4);
+  }
+  .metric-v { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+  .metric-k { font-size: var(--fs-md); color: var(--muted); }
+  .metric-r { font-size: var(--fs-xs); margin-top: 3px; font-weight: 600; }
+
+  /* ---- sparkline ------------------------------------------------------ */
+  .spark { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin: var(--s5) 0 var(--s1); }
+  .sparkcol { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+  .sparkbar {
+    width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; opacity: .85;
+    background: var(--accent); transition: opacity .12s;
+  }
+  .sparkcol:hover .sparkbar { opacity: 1; }
+  .sparkaxis { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--muted); }
+
+  /* ---- age band ------------------------------------------------------- */
+  .agebar { display: flex; height: 24px; border-radius: var(--r-sm); overflow: hidden; }
+  .ageseg { height: 100%; }
+  .agekey {
+    display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s2);
+    font-size: var(--fs-sm); color: var(--muted);
+  }
+  .agekey span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .agekey strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- chips ---------------------------------------------------------- */
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3); }
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s2);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r-pill); padding: 4px 6px 4px 12px; font-size: var(--fs-md);
+  }
+  .chip button {
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 0 3px; border-radius: var(--r-sm);
+  }
+  .chip button:hover { color: var(--bad); }
+
+  /* ---- run console ------------------------------------------------------ */
+  .runbar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+  .runstate {
+    font-size: var(--fs-sm); padding: 3px 10px; border-radius: var(--r-pill);
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+  }
+  .runstate.running { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .runstate.done { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .runstate.failed { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+  .runlog {
+    margin-top: var(--s3); max-height: 190px; overflow-y: auto;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: var(--s3);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--fs-xs); line-height: 1.65; color: var(--ink-2);
+    white-space: pre-wrap; word-break: break-word;
+  }
+
+  /* ---- skeleton ------------------------------------------------------- */
+  .sk { background: var(--line); border-radius: var(--r-sm); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .sk-circle { width: 108px; height: 108px; border-radius: 50%; flex: none; }
+  .sk-line { height: 11px; margin-bottom: var(--s2); }
+
+  /* ---- welcome -------------------------------------------------------- */
+  .weights { display: grid; gap: var(--s2); margin: var(--s4) 0 0; }
+  .weight {
+    display: grid; grid-template-columns: 1fr 38px; gap: var(--s2) var(--s3);
+    align-items: center; font-size: var(--fs-md);
+  }
+  @media (min-width: 560px) { .weight { grid-template-columns: 150px 1fr 38px; } }
+  /* Narrow: name and share share a line, the bar drops below them. Wide: the
+     bar sits between the two, which `order` achieves without a second DOM. */
+  .weight .track { grid-column: 1 / -1; }
+  .weight-pct { text-align: right; font-weight: 600; }
+  @media (min-width: 560px) {
+    .weight .track { grid-column: auto; }
+    .weight-pct { order: 1; }
+  }
+  .sources { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+  .source-tag {
+    font-size: var(--fs-xs); color: var(--muted); background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: var(--r-pill); padding: 3px 10px;
+  }
+
+  /* ---- national map -------------------------------------------------- */
+  .natmap { height: 70vh; min-height: 420px; border-radius: var(--r-lg);
+            overflow: hidden; border: 1px solid var(--line); }
+  .natmap-controls { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+  .natmap-legend {
+    display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm);
+    color: var(--muted); flex-wrap: wrap;
+  }
+  .natmap-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--surface); color: var(--ink);
+  }
+  .leaflet-container { background: var(--bg); }
+  .natmap-popup h3 { margin: 0 0 6px; font-size: var(--fs-base); }
+  .natmap-popup .row { padding: 2px 0; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+/* ---- formatting ------------------------------------------------------- */
+
+const nl = (n) => n.toLocaleString("nl-NL");
+const euros = (n) => (n == null ? null : "€" + nl(n));
+const kEuros = (n) => (n == null ? null : "€" + Math.round(n / 1000) + "k");
+const pct1 = (v) => (v == null ? null : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`);
+const pct0 = (v) => (v == null ? "—" : `${v.toFixed(0)}%`);
+
+/** Traffic-light colour for a 0-10 score. */
+function hue(score) {
+  if (score >= 7) return "var(--good)";
+  if (score >= 5) return "var(--mid)";
+  return "var(--bad)";
+}
+/** Same idea for a ratio where 1.0 is the national average. */
+function ratioHue(r) {
+  return r > 1.5 ? "var(--bad)" : r > 1 ? "var(--mid)" : "var(--good)";
+}
+
+const LABEL = {
+  physical_safety: "Safety",
+  peer_family_concentration: "Families",
+  education_quality_access: "Schools",
+  environmental_health: "Environment",
+  structural_security: "Foundation",
+};
+
+const CRIME_LABEL = {
+  burglaries: "Burglary", vandalism: "Vandalism",
+  nuisance: "Nuisance", violent: "Violence",
+};
+
+/* ---- primitives ------------------------------------------------------- */
+
+/** Every result section looks the same: a quiet uppercase title, an optional
+ *  scope chip saying what the numbers describe, and a one-line explanation.
+ *  Repeating that by hand is how the old markup drifted. */
+function Panel({ id, nav, title, scope, note, children }) {
+  return (
+    <section className="panel" id={id} data-nav={nav}
+             aria-labelledby={id ? `${id}-h` : undefined}>
+      <div className="panel-head">
+        <h2 id={id ? `${id}-h` : undefined}>{title}</h2>
+        {scope && <span className="scope">{scope}</span>}
+      </div>
+      {note && <p className="note">{note}</p>}
+      {children}
+    </section>
+  );
+}
+
+function Stat({ value, label, tone, small }) {
+  return (
+    <div>
+      <div className={"stat-v" + (small ? " sm" : "")} style={tone ? { color: tone } : undefined}>
+        {value}
+      </div>
+      <div className="stat-k">{label}</div>
+    </div>
+  );
+}
+
+/** A label/value line. `src` names where the number came from, because a
+ *  figure whose provenance is invisible gets trusted more than it deserves. */
+function Row({ k, v, src, tone }) {
+  return (
+    <div className="row">
+      <span className="row-k">{k}{src && <em className="src">{src}</em>}</span>
+      <span className="row-v" style={tone ? { color: tone } : undefined}>{v}</span>
+    </div>
+  );
+}
+
+function Bar({ score }) {
+  return (
+    <div className="track">
+      <div className="fill" style={{ width: `${Math.max(0, Math.min(10, score)) * 10}%`,
+                                     background: hue(score) }} />
+    </div>
+  );
+}
+
+/** Radial gauge for the headline score. A ring reads as "out of ten" at a
+ *  glance in a way a bare number never does. */
+function Gauge({ score }) {
+  const r = 46, circ = 2 * Math.PI * r;
+  const filled = circ * Math.max(0, Math.min(10, score)) / 10;
+  const colour = hue(score);
+  return (
+    <svg className="gauge" viewBox="0 0 112 112" role="img"
+         aria-label={`Overall score ${score.toFixed(1)} out of 10`}>
+      <circle className="gauge-track" cx="56" cy="56" r={r} />
+      <circle className="gauge-fill" cx="56" cy="56" r={r}
+              transform="rotate(-90 56 56)"
+              style={{ stroke: colour, strokeDasharray: `${filled} ${circ}` }} />
+      <text className="gauge-num" x="56" y="58" style={{ fill: colour }}>{score.toFixed(1)}</text>
+      <text className="gauge-den" x="56" y="75">out of 10</text>
+    </svg>
+  );
+}
+
+/** Sparkline shared by the crime, WOZ and market panels. `floorPct` keeps a
+ *  low bar visible instead of collapsing it to nothing. */
+function Spark({ points, height, floorPct = 15, colourOf, titleOf }) {
+  const values = points.map((p) => p.value);
+  const peak = Math.max(...values);
+  const trough = Math.min(...values);
+  const span = Math.max(1e-9, peak - trough);
+  return (
+    <div className="spark" style={height ? { height } : undefined}>
+      {points.map((p) => (
+        <div className="sparkcol" key={p.key} title={titleOf ? titleOf(p) : undefined}>
+          <div className="sparkbar"
+               style={{ height: `${floorPct + ((p.value - trough) / span) * (100 - floorPct)}%`,
+                        background: colourOf ? colourOf(p) : undefined }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Axis({ left, middle, right }) {
+  return (
+    <div className="sparkaxis">
+      <span>{left}</span><span>{middle}</span><span>{right}</span>
+    </div>
+  );
+}
+
+/* ---- theme ------------------------------------------------------------ */
+
+const THEME_KEY = "woonagent.theme";
+const THEME_ORDER = ["system", "light", "dark"];
+const THEME_ICON = { system: "◐", light: "☀", dark: "☾" };
+
+function useTheme() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(THEME_KEY) || "system"; } catch { return "system"; }
+  });
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = mode === "dark" || (mode === "system" && media.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    };
+    apply();
+    try { localStorage.setItem(THEME_KEY, mode); } catch { /* private window */ }
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [mode]);
+
+  const cycle = () => setMode(THEME_ORDER[(THEME_ORDER.indexOf(mode) + 1) % 3]);
+  return [mode, cycle];
+}
+
+/* ---- scroll spy ------------------------------------------------------- */
+
+/** Highlights the rail entry for whichever panel is nearest the top of the
+ *  viewport. The negative bottom margin means a panel only counts once it has
+ *  reached the upper third — otherwise the last section flickers active while
+ *  you are still reading the one above it. */
+function useScrollSpy(ids) {
+  const [active, setActive] = useState(null);
+  const key = ids.join("|");
+
+  useEffect(() => {
+    if (!ids.length) return;
+    const seen = new Map();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((e) => seen.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : null));
+      const visible = ids.filter((id) => seen.get(id) != null);
+      if (visible.length) setActive(visible[0]);
+    }, { rootMargin: "-15% 0px -65% 0px", threshold: 0 });
+
+    const nodes = ids.map((id) => document.getElementById(id)).filter(Boolean);
+    nodes.forEach((n) => observer.observe(n));
+    return () => observer.disconnect();
+  }, [key]);
+
+  return active || ids[0];
+}
+
+function Rail({ sections, active }) {
+  if (sections.length < 2) return null;
+  return (
+    <nav className="rail" aria-label="Sections of this report">
+      {sections.map((s) => (
+        <a key={s.id} href={`#${s.id}`}
+           className={"rail-link" + (active === s.id ? " is-active" : "")}
+           aria-current={active === s.id ? "true" : undefined}>
+          {s.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+/* ---- panels: the house ------------------------------------------------ */
+
+/** What is known about this specific dwelling, as opposed to its area.
+ *
+ *  Most panels below describe a neighbourhood; these figures describe the
+ *  house. Keeping them apart matters — "the buurt averages €891k" and "this
+ *  flat is 76 m² built in 2002" answer different questions, and blurring them
+ *  is how a buyer talks themselves into the wrong house.
+ */
+function ThisHomePanel({ listing, building, enrichment }) {
+  if (!building && !listing) return null;
+  const noise = enrichment?.noise?.usable ? enrichment.noise.payload : null;
+  const air = enrichment?.air?.usable ? enrichment.air.payload : null;
+  const lbm = enrichment?.leefbaarometer?.usable ? enrichment.leefbaarometer.payload : null;
+  const soil = enrichment?.soil?.usable ? enrichment.soil.payload : null;
+
+  const perM2 = listing?.price_eur && listing?.living_area_m2
+    ? Math.round(listing.price_eur / listing.living_area_m2) : null;
+
+  const facts = [
+    ["Built", building?.construction_year ?? listing?.construction_year, "BAG"],
+    ["Floor area", listing?.living_area_m2 && `${listing.living_area_m2} m²`, "BAG"],
+    ["Asking price", euros(listing?.price_eur), "listing"],
+    ["Price per m²", euros(perM2), "derived"],
+    ["Energy label", building?.energy_label, "EP-Online"],
+    ["Dwellings in building", building?.units_in_building, "BAG"],
+    ["Foundation risk", soil?.foundation_risk_class, "RVO · PC6"],
+    ["Flood probability", soil?.flood_risk_class, "RIVM"],
+    ["Noise at this point", noise?.cumulative_lden_db != null
+      ? `${noise.cumulative_lden_db.toFixed(0)} dB Lden`
+      : (noise && noise.sources_mapped === 0 ? "none mapped" : null), "RIVM"],
+    ["Liveability cell", lbm?.klasse, "Leefbaarometer · 100 m"],
+    ["NO₂", air?.no2_ug_m3 != null && `${air.no2_ug_m3.toFixed(0)} µg/m³`, "RIVM"],
+    ["PM2.5", air?.pm25_ug_m3 != null && `${air.pm25_ug_m3.toFixed(0)} µg/m³`, "RIVM"],
+  ].filter(([, v]) => v != null && v !== "");
+
+  if (!facts.length) return null;
+  const half = Math.ceil(facts.length / 2);
+
+  return (
+    <Panel id="home" nav="This home" title="This home" scope="this address"
+           note="Measured at this address, not averaged over the neighbourhood.">
+      <div className="cols">
+        {[facts.slice(0, half), facts.slice(half)].map((column, i) => (
+          <div key={i}>
+            {column.map(([k, v, src]) => <Row key={k} k={k} v={v} src={src} />)}
+          </div>
+        ))}
+      </div>
+      {!building?.energy_label && (
+        <p className="footnote">
+          No registered energy label for this dwelling. Set
+          {" "}<code>WOONAGENT_EPONLINE_API_KEY</code> to look it up.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+/** Indicative energy-renovation cost between two labels.
+ *
+ *  User-triggered on purpose: the target is a choice only the buyer can make,
+ *  and the answer changes entirely with it. The current label is prefilled
+ *  from EP-Online when the register has one, and stays editable — the register
+ *  can be out of date, and you may know the house better than it does.
+ */
+const LABELS = ["A+++++", "A++++", "A+++", "A++", "A+", "A", "B", "C", "D", "E", "F", "G"];
+
+function RenovationPanel({ building }) {
+  const registered = building?.energy_label || "";
+  const [current, setCurrent] = useState(registered);
+  const [target, setTarget] = useState("B");
+  const [reno, setReno] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => { setCurrent(registered); setReno(null); }, [registered]);
+
+  async function calculate() {
+    if (!current || !target) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch("/renovation", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_label: current, target_label: target,
+          house_type: building?.house_type || null,
+          units_in_building: building?.units_in_building ?? null,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(
+        typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
+      setReno(body);
+    } catch (err) {
+      setError(explain(err));
+    } finally { setBusy(false); }
+  }
+
+  const nothing = reno && !reno.measures?.length;
+
+  return (
+    <Panel id="renovation" nav="Renovation" title="Energy renovation" scope="this address"
+           note={registered
+             ? <>Registered label <strong>{registered}</strong> from EP-Online — change it if you know better.</>
+             : <>No registered label for this address, so pick the current one yourself.</>}>
+      <form className="fields" onSubmit={(e) => { e.preventDefault(); calculate(); }}>
+        <div className="span-2">
+          <label htmlFor="cl">Current label</label>
+          <select id="cl" value={current} onChange={(e) => { setCurrent(e.target.value); setReno(null); }}>
+            <option value="">Select…</option>
+            {LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+        <div className="span-2">
+          <label htmlFor="tl">Desired label</label>
+          <select id="tl" value={target} onChange={(e) => { setTarget(e.target.value); setReno(null); }}>
+            {LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+        <div className="actions">
+          <button className="btn btn-primary" disabled={busy || !current}>
+            {busy && <span className="spinner" />}{busy ? "Estimating…" : "Estimate cost"}
+          </button>
+          {!current && <span className="hint">Pick the current label to start.</span>}
+        </div>
+      </form>
+
+      {error && <p className="err" role="alert">{error}</p>}
+
+      {nothing && (
+        <p className="empty">Nothing to do — {current} already meets {target}.</p>
+      )}
+
+      {reno && reno.measures?.length > 0 && (
+        <>
+          <div className="stats" style={{ marginTop: "var(--s5)" }}>
+            <Stat label={`${reno.energy_label} → ${reno.target_label}`}
+                  value={kEuros(reno.total_low_eur) +
+                         (reno.total_high_eur !== reno.total_low_eur ? `–${kEuros(reno.total_high_eur)}` : "")} />
+            <Stat small tone="var(--good)" label="subsidy"
+                  value={"−" + euros(reno.total_subsidy_eur)} />
+            <Stat small tone="var(--good)"
+                  label={"saved per year" + (reno.payback_years != null ? ` · pays back in ${reno.payback_years} yr` : "")}
+                  value={euros(reno.total_saving_eur_year)} />
+          </div>
+
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr><th>Measure</th><th className="num">Indicative cost</th></tr>
+              </thead>
+              <tbody>
+                {reno.measures.map((m) => (
+                  <tr key={m.measure}>
+                    <td><a href={m.url} target="_blank" rel="noreferrer">{m.title}</a></td>
+                    <td className="num">
+                      {euros(m.cost_low_eur)}
+                      {m.cost_high_eur !== m.cost_low_eur && `–${nl(m.cost_high_eur)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="footnote">
+            {reno.is_apartment && (
+              <><strong>This is a flat.</strong> The roof, facade and floor belong to the
+              VvE, so these are building-level figures rather than your bill — check the
+              VvE's reserve fund and its MJOP.<br /></>
+            )}
+            Figures from <a href={reno.source_url} target="_blank" rel="noreferrer">
+            {reno.source || "Verbeterjehuis"}</a>: national averages by house type, not a
+            quote.{!reno.house_type && " The range spans terraced to detached, because the house type is unknown."}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/* ---- compare shortlist -------------------------------------------------- */
+
+const COMPARE_KEY = "woonagent.compare.list";
+const MAX_COMPARE = 6;
+
+function loadCompareList() {
+  try {
+    const raw = localStorage.getItem(COMPARE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }          // private window, cleared storage, blocked
+}
+function saveCompareList(list) {
+  try { localStorage.setItem(COMPARE_KEY, JSON.stringify(list)); } catch { /* fine */ }
+}
+
+/** The full ScoredProperty is large — an enrichment bundle per address adds
+ *  up fast against localStorage's few-MB quota. This keeps only what a
+ *  side-by-side comparison actually shows, so a handful of addresses stays
+ *  well within budget and survives a page reload. */
+function toCompareRecord(result) {
+  const { listing, score, enrichment, building } = result;
+  const geo = enrichment?.geo;
+  const livingArea = listing.living_area_m2;
+  const perM2 = listing.price_eur && livingArea
+    ? Math.round(listing.price_eur / livingArea) : null;
+
+  return {
+    property_id: listing.property_id,
+    address: geo?.matched_address || listing.address,
+    buurt: geo?.buurtnaam || null,
+    gemeente: geo?.gemeentenaam || null,
+    url: listing.url && !listing.url.includes("example.invalid") ? listing.url : null,
+    total_score: score.total_score,
+    confidence: score.confidence,
+    coverage_pct: score.data_coverage_pct,
+    dimensions: score.dimensions.map((d) => (
+      { dimension: d.dimension, score: d.score, imputed: d.imputed })),
+    price_eur: listing.price_eur ?? null,
+    living_area_m2: livingArea ?? null,
+    price_per_m2: perM2,
+    construction_year: building?.construction_year ?? listing.construction_year ?? null,
+    energy_label: building?.energy_label ?? null,
+    risk_flags: (score.risk_flags || []).map((f) => (
+      { severity: f.severity, message: f.message })),
+    added_at: Date.now(),
+  };
+}
+
+/* ---- panels: commute -------------------------------------------------- */
+
+const COMMUTE_KEY = "woonagent.commute.destinations";
+
+/** Destinations persist per browser: they are your life, not this property's. */
+function loadDestinations() {
+  try {
+    const raw = localStorage.getItem(COMMUTE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }          // private window, cleared storage, blocked
+}
+function saveDestinations(list) {
+  try { localStorage.setItem(COMMUTE_KEY, JSON.stringify(list)); } catch { /* fine */ }
+}
+
+const MODE_ICON = { car: "🚗", bike: "🚲", transit: "🚆" };
+const MODE_LABEL = { car: "Car", bike: "Bike", transit: "Transit" };
+
+function CommutePanel({ postcode, houseNumber, addition }) {
+  const [dests, setDests] = useState(loadDestinations);
+  const [label, setLabel] = useState("");
+  const [query, setQuery] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => { saveDestinations(dests); }, [dests]);
+
+  function add(e) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setDests([...dests, { label: label.trim() || query.trim(), query: query.trim() }]);
+    setLabel(""); setQuery(""); setResult(null);
+  }
+  const remove = (i) => { setDests(dests.filter((_, n) => n !== i)); setResult(null); };
+
+  async function calculate() {
+    if (!dests.length || !postcode || !houseNumber) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch("/commute", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postal_code: postcode, house_number: houseNumber,
+                               house_number_addition: addition || null,
+                               destinations: dests }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(
+        typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
+      setResult(body);
+    } catch (err) {
+      setError(explain(err));
+    } finally { setBusy(false); }
+  }
+
+  const rows = result?.destinations || [];
+  const shown = ["car", "bike", "transit"].filter(
+    (m) => m !== "transit" || result?.transit_available
+           || rows.some((r) => r.legs?.some((l) => l.mode === m)));
+
+  return (
+    <Panel id="commute" nav="Commute" title="Commute" scope="from this address"
+           note="Places you need to reach. Saved in this browser, so they carry over to the next property.">
+      {dests.length > 0 && (
+        <div className="chips">
+          {dests.map((d, i) => (
+            <span className="chip" key={`${d.query}-${i}`}>
+              {d.label}
+              <button onClick={() => remove(i)} aria-label={`Remove ${d.label}`}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <form className="fields" onSubmit={add}>
+        <div className="span-2">
+          <label htmlFor="dl">Name <em>· optional</em></label>
+          <input id="dl" value={label} onChange={(e) => setLabel(e.target.value)}
+                 placeholder="Work" />
+        </div>
+        <div className="span-4">
+          <label htmlFor="dq">Address, postcode or place</label>
+          <input id="dq" value={query} onChange={(e) => setQuery(e.target.value)}
+                 placeholder="1012AB, an address, or paste from Google Maps" />
+        </div>
+        <div className="actions">
+          <button className="btn btn-ghost" type="submit">Add destination</button>
+          <button className="btn btn-primary" type="button" onClick={calculate}
+                  disabled={busy || !dests.length}>
+            {busy && <span className="spinner" />}{busy ? "Routing…" : "Calculate times"}
+          </button>
+          {!dests.length && <span className="hint">Add at least one destination.</span>}
+        </div>
+      </form>
+
+      {error && <p className="err" role="alert">{error}</p>}
+
+      {rows.length > 0 && (
+        <>
+          <div className="scroll-x" style={{ marginTop: "var(--s5)" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Destination</th>
+                  {shown.map((m) => (
+                    <th key={m} className="num">{MODE_ICON[m]} {MODE_LABEL[m]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((d, i) => (
+                  <tr key={`${d.label}-${i}`}>
+                    <td>
+                      <div>{d.label}</div>
+                      <div className="facts" style={{ fontSize: "var(--fs-xs)" }}>
+                        {d.error ? <span className="err">{d.error}</span> : d.matched_address}
+                      </div>
+                    </td>
+                    {shown.map((m) => {
+                      const leg = d.legs?.find((l) => l.mode === m);
+                      return (
+                        <td key={m} className="num">
+                          {leg
+                            ? <><strong>{Math.round(leg.duration_min)}</strong> min
+                                <div className="facts" style={{ fontSize: "var(--fs-xs)" }}>
+                                  {leg.distance_km} km</div></>
+                            : <span className="muted">—</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="footnote">
+            Car via OSRM, bike via BRouter — two routers because OSRM's public server
+            answers every profile from its driving graph, so its "bike" time is a car time.
+            {!result?.transit_available &&
+              " Public transport needs a routing key (WOONAGENT_ORS_API_KEY); no keyless door-to-door transit router exists for the Netherlands."}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/** Other properties this agent has already seen near this one.
+ *
+ *  Asking prices, not sold prices, and the panel says so. Recent transactions
+ *  are Kadaster's and licensed; CBS publishes sale prices no finer than the
+ *  municipality; Funda is refused by decision. This is the comparable set the
+ *  open data actually supports, and it fills up as the watch loop runs.
+ */
+function NearbyPanel({ geo, propertyId }) {
+  const [radius, setRadius] = useState(2000);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!geo?.latitude) return;
+    let cancelled = false;
+    const params = new URLSearchParams({
+      lat: geo.latitude, lon: geo.longitude, radius_m: radius, limit: 12,
+    });
+    if (propertyId) params.set("exclude", propertyId);
+    fetch(`/nearby?${params}`)
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(detailOf(body, r.status));
+        return body;
+      })
+      .then((body) => { if (!cancelled) { setRows(body); setError(null); } })
+      .catch((err) => { if (!cancelled) setError(explain(err)); });
+    return () => { cancelled = true; };
+  }, [geo?.latitude, geo?.longitude, radius, propertyId]);
+
+  if (!geo?.latitude) return null;
+
+  const km = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`);
+
+  return (
+    <Panel id="nearby" nav="Nearby" title="Nearby comparables" scope="your own store"
+           note="Other properties this agent has already scored, nearest first. Asking prices, not sold prices.">
+      <div className="seg" role="tablist" aria-label="Search radius">
+        {[500, 1000, 2000, 5000].map((r) => (
+          <button key={r} role="tab" aria-selected={radius === r}
+                  onClick={() => setRadius(r)}>
+            {r >= 1000 ? `${r / 1000} km` : `${r} m`}
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="err" role="alert">{error}</p>}
+
+      {rows && rows.length === 0 && (
+        <p className="empty">
+          Nothing else within {km(radius)} yet. This fills up as the watch loop runs —
+          start it with <code>uv run woonagent</code>, or widen the radius.
+        </p>
+      )}
+
+      {rows && rows.length > 0 && (
+        <div className="scroll-x">
+          <table>
+            <thead>
+              <tr>
+                <th>Distance</th><th>Address</th>
+                <th className="num">Asking</th><th className="num">€/m²</th>
+                <th className="num">Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.property_id}>
+                  <td className="num" style={{ textAlign: "left" }}>{km(r.distance_m)}</td>
+                  <td>
+                    {r.url && !r.url.includes("example.invalid")
+                      ? <a href={r.url} target="_blank" rel="noreferrer">{r.address}</a>
+                      : r.address}
+                    {r.buurtnaam && <div className="facts" style={{ fontSize: "var(--fs-xs)" }}>
+                      {r.buurtnaam}</div>}
+                  </td>
+                  <td className="num">{euros(r.price_eur) || <span className="muted">—</span>}</td>
+                  <td className="num">{euros(r.price_per_m2) || <span className="muted">—</span>}</td>
+                  <td className="num">
+                    {r.total_score != null
+                      ? <span className="pill" style={{ background: hue(r.total_score) }}>
+                          {r.total_score.toFixed(1)}</span>
+                      : <span className="muted">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="footnote">
+        These are asking prices of listings this agent has seen, not recorded sales.
+        Sold prices per address come from the Kadaster register, which is licensed
+        rather than open; CBS publishes sale prices no finer than the municipality
+        (see Market pressure above).
+      </p>
+    </Panel>
+  );
+}
+
+/* ---- panels: the area ------------------------------------------------- */
+
+/** Who lives here, from CBS Kerncijfers wijken en buurten.
+ *
+ *  The family dimension turns one of these numbers into a score; this shows
+ *  the picture behind it, because "35% of households have children" reads very
+ *  differently next to "59% live alone".
+ */
+const bandColour = (i) => `hsl(${206 + i * 26} 52% ${58 - i * 5}%)`;
+
+function DemographyPanel({ demo }) {
+  if (!demo) return null;
+  const ages = demo.age_bands_pct || {};
+  const bands = Object.keys(ages);
+  if (!bands.length && demo.households_total == null) return null;
+
+  const households = [
+    ["With children", demo.households_with_children_pct, "var(--good)"],
+    ["Without children", demo.households_without_children_pct, "var(--mid)"],
+    ["Single person", demo.single_person_households_pct, "var(--accent)"],
+  ].filter(([, v]) => v != null);
+  // CBS publishes these in the same row the family figures come from, so they
+  // cost no extra request. Shown, not scored — how far the supermarket is is a
+  // preference, not a health or safety fact.
+  const amenities = [
+    ["GP practice", demo.distance_to_gp_km],
+    ["Supermarket", demo.distance_to_supermarket_km],
+    ["Daycare", demo.distance_to_daycare_km],
+    ["Primary school", demo.distance_to_school_km],
+  ].filter(([, v]) => v != null);
+
+  const tenure = [
+    ["Owner-occupied", demo.owner_occupied_pct],
+    ["Rented", demo.rental_pct],
+    ["…of which social", demo.social_housing_pct],
+  ].filter(([, v]) => v != null);
+
+  const note = [
+    `${demo.area_level} ${demo.buurtcode}`,
+    demo.population_total != null && `${nl(demo.population_total)} residents`,
+    demo.households_total != null && `${nl(demo.households_total)} households`,
+    demo.reference_year && `CBS ${demo.reference_year}`,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <Panel id="who" nav="Who lives here" title="Who lives here" scope="area" note={note}>
+      {bands.length > 0 && (
+        <>
+          <div className="agebar" role="img"
+               aria-label={`Age distribution: ${bands.map((b) => `${b} ${ages[b].toFixed(0)}%`).join(", ")}`}>
+            {bands.map((b, i) => (
+              <div key={b} className="ageseg" title={`${b}: ${ages[b].toFixed(0)}%`}
+                   style={{ width: `${ages[b]}%`, background: bandColour(i) }} />
+            ))}
+          </div>
+          <div className="agekey">
+            {bands.map((b, i) => (
+              <span key={b}>
+                <i className="swatch" style={{ background: bandColour(i) }} />
+                <strong>{b}</strong> {ages[b].toFixed(0)}%
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="cols" style={{ marginTop: "var(--s5)" }}>
+        {households.length > 0 && (
+          <div>
+            <div className="colhead">Households</div>
+            {households.map(([k, v, tone]) => <Row key={k} k={k} v={pct0(v)} tone={tone} />)}
+            {demo.avg_household_size != null &&
+              <Row k="Average size" v={demo.avg_household_size} />}
+          </div>
+        )}
+        {amenities.length > 0 && (
+          <div>
+            <div className="colhead">Nearest amenities</div>
+            {amenities.map(([k, v]) => <Row key={k} k={k} v={`${v.toFixed(1)} km`} />)}
+          </div>
+        )}
+
+        {tenure.length > 0 && (
+          <div>
+            <div className="colhead">Housing</div>
+            {tenure.map(([k, v]) => <Row key={k} k={k} v={pct0(v)} />)}
+            {demo.single_family_homes_pct != null && (
+              <Row k="Houses / flats"
+                   v={`${pct0(demo.single_family_homes_pct)} / ${pct0(100 - demo.single_family_homes_pct)}`} />
+            )}
+          </div>
+        )}
+      </div>
+
+      {demo.children_pct_vs_national != null && (
+        <p className="footnote">
+          Households with children are {demo.children_pct_vs_national.toFixed(2)}× the
+          national share (31.5%).
+          {demo.area_level && demo.area_level !== "buurt" &&
+            ` Figures are ${demo.area_level}-level — CBS suppressed the buurt.`}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+/** Recorded crime in the surrounding area over the last twelve months.
+ *
+ *  Counts first, ratios second. "22 burglaries" is what a buyer actually
+ *  wants to know; "1.74x the national rate" is the context for it.
+ */
+function CrimePanel({ crime }) {
+  if (!crime) return null;
+  const counts = crime.counts_12m || {};
+  const groups = Object.keys(CRIME_LABEL).filter((g) => counts[g] != null);
+  const months = crime.monthly_totals || [];
+  if (groups.length === 0 && months.length === 0) return null;
+
+  const window = (crime.period || "").replace(/MM/g, "-");
+  const note = [
+    `${crime.area_level || "area"} ${crime.area_code}`,
+    window,
+    crime.national_average_ratio != null &&
+      `${crime.national_average_ratio.toFixed(2)}× the national rate overall`,
+  ].filter(Boolean).join(" · ");
+
+  const points = months.map((m) => ({ key: m.period, value: m.count, period: m.period }));
+  const peak = Math.max(1, ...months.map((m) => m.count));
+
+  return (
+    <Panel id="crime" nav="Crime" title="Recorded crime · last 12 months" scope="area" note={note}>
+      <div className="metrics">
+        {groups.map((g) => {
+          const ratio = (crime.category_ratios || {})[g];
+          return (
+            <div className="metric" key={g}>
+              <div className="metric-v">{counts[g]}</div>
+              <div className="metric-k">{CRIME_LABEL[g]}</div>
+              {ratio != null && (
+                <div className="metric-r" style={{ color: ratioHue(ratio) }}>
+                  {ratio.toFixed(2)}× national
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {points.length > 0 && (
+        <>
+          <Spark points={points} floorPct={4}
+                 titleOf={(p) => `${p.period.replace("MM", "-")}: ${p.value}`} />
+          <Axis left={months[0].period.replace("MM", "-")}
+                middle={`all offences · peak ${peak}`}
+                right={months[months.length - 1].period.replace("MM", "-")} />
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/** Municipal valuation trend for the surrounding area.
+ *
+ *  Context, not a scoring input: how a neighbourhood is priced says little
+ *  about whether it suits a family, which is what the five dimensions measure.
+ */
+function WozPanel({ woz }) {
+  if (!woz || !woz.points?.length) return null;
+  const pts = woz.points;
+  const latest = pts[pts.length - 1];
+  const tone = (v) => (v == null ? "var(--muted)" : v >= 0 ? "var(--good)" : "var(--bad)");
+
+  return (
+    <Panel id="woz" nav="WOZ" title="WOZ valuation" scope="area average"
+           note={`${woz.area_level} ${woz.area_code} · CBS Kerncijfers wijken en buurten · the average of every dwelling in the area, not this one`}>
+      <div className="stats">
+        <Stat value={kEuros(latest.value_eur)} label={`${latest.year} average`} />
+        <Stat small value={pct1(woz.change_pct_1y) || "—"} label="year on year"
+              tone={tone(woz.change_pct_1y)} />
+        <Stat small value={pct1(woz.change_pct) || "—"} label={`since ${pts[0].year}`}
+              tone={tone(woz.change_pct)} />
+      </div>
+
+      <Spark height={66} colourOf={() => "var(--good)"}
+             points={pts.map((p) => ({ key: p.year, value: p.value_eur, year: p.year }))}
+             titleOf={(p) => `${p.year}: ${euros(p.value)}`} />
+      <Axis left={pts[0].year} middle="average per dwelling" right={latest.year} />
+
+      {woz.missing_years?.length > 0 && (
+        <p className="footnote">
+          No figure for {woz.missing_years.join(", ")} — CBS renumbered this area, so
+          earlier editions describe different boundaries rather than the same place.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+/** Market pressure: sale prices against WOZ assessments.
+ *
+ *  Deliberately not labelled "overbidding". The true figure needs the sale
+ *  price and the asking price for the same transaction, and only one of those
+ *  is public — CBS dropped its asking-price series after 2016, NVM publishes
+ *  overbidding only in PDF reports, Kadaster licenses the transactions.
+ */
+function MarketPanel({ market }) {
+  if (!market?.points?.length) return null;
+  const pts = market.points.filter((p) => p.sale_to_woz != null);
+  if (!pts.length) return null;
+
+  const peak = Math.max(...pts.map((p) => p.sale_to_woz));
+  const now = market.pressure_now;
+  const heat = now == null ? "var(--muted)"
+    : now >= 1.35 ? "var(--bad)" : now >= 1.2 ? "var(--mid)" : "var(--good)";
+  const asking = market.asking_vs_area_pct;
+
+  return (
+    <Panel id="market" nav="Market"
+           title={`Market pressure · ${market.gemeente_name || market.gemeente_code}`}
+           scope="municipality"
+           note="average sale price ÷ average WOZ assessment · CBS 83625NED">
+      <div className="stats">
+        <Stat value={now != null ? `${now.toFixed(2)}×` : "—"} tone={heat}
+              label={`assessed value, ${pts[pts.length - 1].year}`} />
+        <Stat small value={`${peak.toFixed(2)}×`}
+              label={`peak, ${pts.find((p) => p.sale_to_woz === peak)?.year}`} />
+        {asking != null && (
+          <Stat small value={`${asking > 0 ? "+" : ""}${asking.toFixed(1)}%`}
+                tone={asking > 0 ? "var(--bad)" : "var(--good)"}
+                label="this asking price vs area average" />
+        )}
+      </div>
+
+      <Spark height={62}
+             points={pts.map((p) => ({ key: p.year, value: p.sale_to_woz, ...p }))}
+             colourOf={(p) => (p.value >= 1.35 ? "var(--bad)" : p.value >= 1.2 ? "var(--mid)" : "var(--good)")}
+             titleOf={(p) => `${p.year}: sale ${euros(p.average_sale_eur)} · WOZ ${euros(p.average_woz_eur)} · ${p.value}×`} />
+      <Axis left={pts[0].year} middle="sale ÷ assessment" right={pts[pts.length - 1].year} />
+
+      <p className="footnote">
+        Not the overbidding percentage — that needs the asking price of each sale, which
+        is not public. Read the movement, not the level: the WOZ is assessed 18 months
+        before the sales it is compared with, which lifts the ratio in any rising market.
+        The 2021–22 peak is the overbidding era.
+      </p>
+    </Panel>
+  );
+}
+
+/* ---- verdict ---------------------------------------------------------- */
+
+const SEVERITY_WORD = { critical: "Critical", warn: "Warning", info: "Note" };
+
+function Dimension({ dim }) {
+  return (
+    <>
+      <div className={"dim" + (dim.imputed ? " is-imputed" : "")}>
+        <span className="dim-name">
+          {LABEL[dim.dimension] || dim.dimension}
+          {dim.weight != null && <span className="dim-weight"> · {Math.round(dim.weight * 100)}%</span>}
+          {dim.imputed && <span className="dim-weight"> · no data</span>}
+        </span>
+        <Bar score={dim.score} />
+        <span className="dim-val">{dim.score.toFixed(1)}</span>
+      </div>
+      {dim.drivers?.length > 0 && (
+        <ul className="drivers">{dim.drivers.map((d, i) => <li key={i}>{d}</li>)}</ul>
+      )}
+    </>
+  );
+}
+
+const WEIGHTS_KEY = "woonagent.weights";
+
+/** Let the buyer say what matters, and re-score without re-fetching anything.
+ *
+ *  The weighting is a preference, not a constant: a family with small children
+ *  and a couple buying a city flat read the same five numbers for different
+ *  reasons. It posts to /rescore rather than /score because scoring is a pure
+ *  function of the enrichment bundle — re-running /score on every drag would
+ *  cost about a dozen requests to PDOK, CBS, the BAG and two volunteer-run
+ *  routing servers per slider movement.
+ *
+ *  Raw slider positions are stored, not the normalised shares. Normalising on
+ *  the way in would make every slider move all the others, which is unusable.
+ */
+function WeightTuner({ enrichment, defaults, onScore }) {
+  const [raw, setRaw] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || "null");
+      if (saved && typeof saved === "object") return saved;
+    } catch { /* private window, cleared storage */ }
+    return null;
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const base = raw || defaults;
+  const total = Object.values(base).reduce((a, b) => a + b, 0);
+  const dirty = defaults && Object.keys(defaults).some(
+    (k) => Math.abs((base[k] ?? 0) - defaults[k]) > 1e-9);
+
+  // Debounced: dragging a slider fires a change per pixel, and each one would
+  // otherwise be a request.
+  const timer = useRef(null);
+  useEffect(() => {
+    if (!raw || !enrichment) return;
+    try { localStorage.setItem(WEIGHTS_KEY, JSON.stringify(raw)); } catch { /* fine */ }
+    clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      setBusy(true); setError(null);
+      try {
+        const res = await fetch("/rescore", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enrichment, weights: raw }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(detailOf(body, res.status));
+        onScore(body);
+      } catch (err) {
+        setError(explain(err));
+      } finally { setBusy(false); }
+    }, 250);
+    return () => clearTimeout(timer.current);
+  }, [JSON.stringify(raw), enrichment]);
+
+  if (!defaults) return null;
+
+  function reset() {
+    try { localStorage.removeItem(WEIGHTS_KEY); } catch { /* fine */ }
+    setRaw({ ...defaults });
+  }
+
+  return (
+    <div className="tune">
+      <div className="tune-head">
+        <span className="tune-title">What matters to you</span>
+        {busy && <span className="spinner" />}
+        <button className="link-btn" onClick={reset} disabled={!dirty}>
+          Reset to defaults
+        </button>
+      </div>
+
+      <div className="sliders">
+        {Object.keys(defaults).map((key) => {
+          const value = base[key] ?? 0;
+          const share = total > 0 ? (value / total) * 100 : 0;
+          return (
+            <div className={"slider" + (value === 0 ? " is-off" : "")} key={key}>
+              <label htmlFor={`w-${key}`}>{LABEL[key] || key}</label>
+              <input id={`w-${key}`} type="range" min="0" max="0.5" step="0.01"
+                     value={value}
+                     onChange={(e) => setRaw({ ...base, [key]: Number(e.target.value) })} />
+              <span className="slider-pct">{share.toFixed(0)}%</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {error && <p className="err" role="alert">{error}</p>}
+      <p className="footnote">
+        Shares are renormalised to 100%, so moving one slider changes what the
+        others are worth. Saved in this browser and reapplied to the next
+        property. This re-weighs the numbers already fetched — it makes no new
+        requests to any data source.
+      </p>
+    </div>
+  );
+}
+
+/** Whether this address is already in the comparison list — read fresh each
+ *  render rather than kept as component state, since the list can change from
+ *  the Compare tab (a removal there) while this panel is still on screen. */
+function useInCompareList(propertyId) {
+  const [inList, setInList] = useState(() =>
+    loadCompareList().some((r) => r.property_id === propertyId));
+  useEffect(() => {
+    setInList(loadCompareList().some((r) => r.property_id === propertyId));
+  }, [propertyId]);
+  return [inList, setInList];
+}
+
+function Verdict({ data, defaults, onScore }) {
+  const { listing, score, enrichment } = data;
+  const geo = enrichment?.geo;
+  const facts = [
+    euros(listing.price_eur),
+    listing.living_area_m2 && `${listing.living_area_m2} m²`,
+    listing.construction_year && `built ${listing.construction_year}`,
+  ].filter(Boolean);
+
+  const [inCompare, setInCompare] = useInCompareList(listing.property_id);
+  const [compareFull, setCompareFull] = useState(false);
+
+  function toggleCompare() {
+    const list = loadCompareList();
+    if (inCompare) {
+      saveCompareList(list.filter((r) => r.property_id !== listing.property_id));
+      setInCompare(false);
+      setCompareFull(false);
+      return;
+    }
+    if (list.length >= MAX_COMPARE) { setCompareFull(true); return; }
+    saveCompareList([...list, toCompareRecord(data)]);
+    setInCompare(true);
+  }
+
+  return (
+    <Panel id="verdict" nav="Overall" title="Overall">
+      <div className="verdict">
+        <Gauge score={score.total_score} />
+        <div className="verdict-id">
+          <div className="addr">{geo?.matched_address || listing.address}</div>
+          <div className="facts facts-strong">
+            {[geo?.buurtnaam, geo?.gemeentenaam].filter(Boolean).join(" · ")}
+          </div>
+          {facts.length > 0 && <div className="facts">{facts.join(" · ")}</div>}
+          <div className="facts" style={{ marginTop: "var(--s2)" }}>
+            {score.data_coverage_pct}% of sources resolved · confidence {score.confidence}
+          </div>
+          <div className="runbar" style={{ marginTop: "var(--s3)" }}>
+            <button className={"btn " + (inCompare ? "btn-ghost" : "btn-primary")}
+                    onClick={toggleCompare}>
+              {inCompare ? "Remove from comparison" : "Add to comparison"}
+            </button>
+            {compareFull && (
+              <span className="hint">
+                Comparison is full ({MAX_COMPARE}) — remove one on the Compare tab first.
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="dims">
+        {score.dimensions.map((d) => <Dimension key={d.dimension} dim={d} />)}
+      </div>
+
+      <WeightTuner enrichment={enrichment} defaults={defaults} onScore={onScore} />
+
+      {score.risk_flags?.length > 0 && (
+        <div className="flags">
+          {score.risk_flags.map((f) => (
+            <div className={"flag " + f.severity} key={f.code}>
+              <span className="flag-sev">{SEVERITY_WORD[f.severity] || f.severity}</span>
+              <span>{f.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** Shown while the enrichment fan-out runs. Six providers, a geocode and two
+ *  CBS tables take real seconds; a frozen button gives no sense of that, and
+ *  the layout jumping into place afterwards reads as a glitch. */
+function ResultSkeleton() {
+  return (
+    <section className="panel" aria-hidden="true">
+      <div className="verdict">
+        <div className="sk sk-circle" />
+        <div className="verdict-id" style={{ width: "100%" }}>
+          <div className="sk sk-line" style={{ width: "62%", height: 20 }} />
+          <div className="sk sk-line" style={{ width: "40%" }} />
+          <div className="sk sk-line" style={{ width: "30%" }} />
+        </div>
+      </div>
+      <div className="dims">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div className="dim" key={i}>
+            <span className="sk sk-line" style={{ width: 96, marginBottom: 0 }} />
+            <div className="sk" style={{ height: 7, borderRadius: 999 }} />
+            <span className="sk sk-line" style={{ width: 28, marginBottom: 0 }} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ---- reaching the API ------------------------------------------------- */
+
+/** The page must be served by the API, not opened from disk.
+ *
+ *  Two ways to get "Failed to fetch", and the browser's message distinguishes
+ *  neither: the server is not running, or this file was opened directly so a
+ *  relative fetch resolves against file:// and never reaches the API.
+ */
+const SERVED_BY_API = location.protocol === "http:" || location.protocol === "https:";
+
+/** Turn a fetch failure into something that says what to do about it. */
+function explain(err) {
+  if (!SERVED_BY_API) {
+    return "This page was opened straight from disk, so it cannot reach the API. " +
+           "Start the server with `uv run uvicorn app.main:app --reload` and open " +
+           "http://localhost:8000/ui instead.";
+  }
+  if (err instanceof TypeError) {
+    return `Could not reach the API at ${location.origin}. Is the server still ` +
+           "running? Start it with `uv run uvicorn app.main:app --reload`.";
+  }
+  return err.message;
+}
+
+//: Marker for the one backend error worth a guided fix rather than a plain
+//: banner. Coupled to the exact wording in app/scrapers/funda_url.py's
+//: FundaUrlUnparseable message for the app-share-link case — if that message
+//: changes, this constant has to change with it, which is why both sides say
+//: so in a comment rather than leaving the coupling silent.
+const FUNDA_SHARE_LINK_MARKER = "shared from Funda's app";
+
+/** Pydantic returns a list of field errors; our own guards return a string. */
+function detailOf(body, status) {
+  const detail = body?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((d) => `${d.loc?.slice(-1)}: ${d.msg}`).join("; ");
+  return `HTTP ${status}`;
+}
+
+function OfflineBanner() {
+  if (SERVED_BY_API) return null;
+  return (
+    <div className="banner banner-bad">
+      <div>
+        <strong>Opened from disk.</strong> Nothing on this page will work until it is
+        served by the API. Run <code>uv run uvicorn app.main:app --reload</code> and open
+        {" "}<code>http://localhost:8000/ui</code>.
+      </div>
+    </div>
+  );
+}
+
+/* ---- search ----------------------------------------------------------- */
+
+//: Why each dimension is there. The share itself comes from GET /weights, so
+//: retuning the engine does not leave this list quietly lying.
+const WEIGHT_WHY = {
+  physical_safety: "Recorded crime, weighted to burglary and violence.",
+  peer_family_concentration: "Households with children, age mix, tenure.",
+  education_quality_access: "Schools within reach, from DUO.",
+  environmental_health: "Road, rail and air noise; liveability.",
+  structural_security: "Subsidence and foundation risk for this era of build.",
+};
+
+const SOURCES = ["PDOK Locatieserver", "BAG", "CBS StatLine", "Politie Open Data",
+                 "RIVM Geluidbelasting", "Leefbaarometer", "DUO Onderwijsdata",
+                 "RVO Funderingsviewer", "EP-Online"];
+
+/** The first screen. An empty page with two forms on it says nothing about
+ *  what the tool measures or where the numbers come from. */
+function Welcome({ defaults }) {
+  const rows = Object.entries(defaults || {});
+  const peak = Math.max(0.01, ...rows.map(([, w]) => w));
+
+  return (
+    <Panel title="What this scores"
+           note="Five weighted dimensions, each computed from public Dutch open data and shown with the numbers behind it. Score an address and you can reweigh them to suit what you actually care about. Nothing here is a valuation; it is a habitability read on the address.">
+      <div className="weights">
+        {rows.map(([key, w]) => (
+          <div className="weight" key={key}>
+            <span>{LABEL[key] || key}</span>
+            <span className="weight-pct">{Math.round(w * 100)}%</span>
+            <div className="track">
+              <div className="fill"
+                   style={{ width: `${(w / peak) * 100}%`, background: "var(--accent)" }} />
+            </div>
+            <span className="hint span-all" style={{ marginTop: -6 }}>{WEIGHT_WHY[key]}</span>
+          </div>
+        ))}
+      </div>
+      <div className="sources">
+        {SOURCES.map((s) => <span className="source-tag" key={s}>{s}</span>)}
+      </div>
+    </Panel>
+  );
+}
+
+/** Paste a listing URL, or type the address. Two ways in, one card — they are
+ *  alternatives, and stacking both as separate forms made the page open on a
+ *  wall of inputs with no indication that you only need one of them.
+ *
+ *  The URL is parsed server-side for its address and geocoded; the listing
+ *  site is never fetched. Price, area and build year live only in the page
+ *  body, so they stay manual — build year most of all, since it drives the
+ *  foundation check.
+ */
+/** Type an address, pick from a dropdown, done — the way Google Maps' search
+ *  box works, backed here by PDOK's own address suggestions rather than a
+ *  third-party service.
+ *
+ *  Debounced at 300ms and gated at three characters: PDOK's ``/suggest`` is
+ *  tuned for partial input, but there is no reason to fire it on every single
+ *  keystroke of "Amsterdam". Selecting a suggestion is a second, cheap
+ *  request (``/geocode/address``) that turns the picked id into a postcode
+ *  and house number — the same fields the manual form below fills, so
+ *  nothing about how scoring happens changes; this only saves typing.
+ *
+ *  Degrades honestly: if PDOK's suggest is slow or down, the dropdown is
+ *  simply empty and the fields below still take direct typing, exactly as
+ *  they did before this existed.
+ */
+function AddressAutocomplete({ onPick }) {
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [busy, setBusy] = useState(false);
+  const requestId = useRef(0);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3) { setItems([]); setOpen(false); return; }
+    const id = ++requestId.current;
+    const timer = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/geocode/suggest?q=${encodeURIComponent(q)}`);
+        const body = res.ok ? await res.json() : [];
+        if (id === requestId.current) { setItems(body); setOpen(true); setActive(-1); }
+      } catch {
+        if (id === requestId.current) { setItems([]); }
+      } finally {
+        if (id === requestId.current) setBusy(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Close the dropdown on an outside click, the way every address
+  // autocomplete behaves.
+  useEffect(() => {
+    function onDocClick(e) {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  async function pick(item) {
+    setQuery(item.label);
+    setOpen(false);
+    try {
+      const res = await fetch(`/geocode/address?id=${encodeURIComponent(item.id)}`);
+      const body = await res.json();
+      if (res.ok) onPick(body);
+    } catch { /* the manual fields below still work if this fails */ }
+  }
+
+  function onKeyDown(e) {
+    if (!open || items.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, items.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(items[active]); }
+    else if (e.key === "Escape") { setOpen(false); }
+  }
+
+  return (
+    <div className="autocomplete" ref={boxRef}>
+      <label htmlFor="addr-search">Search address</label>
+      <input id="addr-search" value={query} autoComplete="off"
+             onChange={(e) => setQuery(e.target.value)}
+             onFocus={() => items.length > 0 && setOpen(true)}
+             onKeyDown={onKeyDown}
+             placeholder="Start typing a street, e.g. Cruquiuskade 289 Amsterdam" />
+      {open && (
+        <div className="autocomplete-list" role="listbox">
+          {items.length === 0 && (
+            <div className="autocomplete-empty">{busy ? "Searching…" : "No matches"}</div>
+          )}
+          {items.map((item, i) => (
+            <button type="button" key={item.id} role="option"
+                    className={"autocomplete-item" + (i === active ? " is-active" : "")}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => pick(item)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchCard({ busy, onBusy, onResult, onError }) {
+  const [mode, setMode] = useState("url");
+  const [url, setUrl] = useState("");
+  const [urlYear, setUrlYear] = useState("");
+  // Built year and floor area come from the BAG registry automatically once
+  // an address resolves — these two inputs exist only for the rare case BAG
+  // is wrong or missing (a post-renovation year, a remeasurement dispute), so
+  // they stay collapsed rather than sitting open in the primary flow.
+  const [showOverrides, setShowOverrides] = useState(false);
+  // Rendered inline, right next to the field the mistake was in, rather than
+  // in the generic error banner further down the page — the fix is "do this
+  // instead", which reads far better next to the thing that needs redoing
+  // than as one more line in a list of unrelated errors.
+  const [shareLinkHelp, setShareLinkHelp] = useState(false);
+  const [form, setForm] = useState({
+    postal_code: "1181AA", house_number: "1", house_number_addition: "",
+    construction_year: "", price_eur: "", living_area_m2: "",
+  });
+
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const num = (v) => (v === "" ? null : Number(v));
+
+  async function post(path, body) {
+    onBusy(true); onError(null); onResult(null); setShareLinkHelp(false);
+    try {
+      const res = await fetch(path, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(detailOf(payload, res.status));
+      onResult(payload);
+    } catch (err) {
+      const message = explain(err);
+      if (message.includes(FUNDA_SHARE_LINK_MARKER)) {
+        setShareLinkHelp(true);          // guided callout instead of a banner
+      } else {
+        onError(message);
+      }
+    } finally {
+      onBusy(false);
+    }
+  }
+
+  const submitUrl = (e) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    post("/score-url", { url: url.trim(), construction_year: num(urlYear) });
+  };
+
+  const submitAddress = (e) => {
+    e.preventDefault();
+    const addition = form.house_number_addition.trim();
+    post("/score", {
+      property_id: `ui-${form.postal_code}-${form.house_number}${addition}`,
+      source: "manual",
+      url: "https://example.invalid/ui",
+      address: `${form.postal_code} ${form.house_number}${addition ? " " + addition : ""}`,
+      postal_code: form.postal_code,
+      house_number: form.house_number,
+      house_number_addition: addition || null,
+      construction_year: num(form.construction_year),
+      price_eur: num(form.price_eur),
+      living_area_m2: num(form.living_area_m2),
+    });
+  };
+
+  return (
+    <section className="panel" id="search" data-nav="Search">
+      <div className="seg" role="tablist" aria-label="How to identify the property">
+        <button role="tab" aria-selected={mode === "url"}
+                onClick={() => { setMode("url"); setShareLinkHelp(false); }}>
+          Listing URL
+        </button>
+        <button role="tab" aria-selected={mode === "address"}
+                onClick={() => { setMode("address"); setShareLinkHelp(false); }}>
+          Address
+        </button>
+      </div>
+
+      {mode === "url" ? (
+        <form className="fields" onSubmit={submitUrl}>
+          <div className="span-all">
+            <label htmlFor="url">Listing URL</label>
+            <input id="url" value={url}
+                   onChange={(e) => { setUrl(e.target.value); setShareLinkHelp(false); }}
+                   placeholder="https://www.funda.nl/detail/koop/amsterdam/huis-singel-30/43829102/" />
+          </div>
+          <div className="span-2">
+            <label htmlFor="uy">Built <em>· optional</em></label>
+            <input id="uy" value={urlYear} onChange={(e) => setUrlYear(e.target.value)}
+                   placeholder="from BAG" inputMode="numeric" />
+          </div>
+          <div className="actions">
+            <button className="btn btn-primary" disabled={busy}>
+              {busy && <span className="spinner" />}{busy ? "Scoring…" : "Score listing"}
+            </button>
+            <span className="hint">
+              The address is read from the URL; build year and area come from the BAG
+              registry. The listing site is never fetched.
+            </span>
+          </div>
+
+          {shareLinkHelp && (
+            <div className="fixit span-all" role="alert">
+              <div className="fixit-title">That's a share link, not a listing page</div>
+              <p className="note" style={{ margin: "0 0 8px" }}>
+                Funda's app share button only encodes the listing's internal id — the
+                address itself was never in the link, so there is nothing to read out of it.
+              </p>
+              <ol>
+                <li>Reopen the link and choose "Open in browser" (or paste it into any browser)</li>
+                <li>Once the listing loads, copy the URL from the address bar</li>
+                <li>Paste that URL here instead</li>
+              </ol>
+              <div className="actions fixit-actions">
+                <button type="button" className="btn btn-ghost"
+                        onClick={() => { setMode("address"); setShareLinkHelp(false); }}>
+                  Or type the address instead →
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
+      ) : (
+        <form className="fields" onSubmit={submitAddress}>
+          <div className="span-all">
+            <AddressAutocomplete onPick={(picked) => setForm({
+              ...form,
+              postal_code: picked.postal_code,
+              house_number: picked.house_number,
+              house_number_addition: picked.house_number_addition || "",
+            })} />
+          </div>
+          <div className="span-2">
+            <label htmlFor="pc">Postcode</label>
+            <input id="pc" value={form.postal_code} onChange={set("postal_code")}
+                   placeholder="1015AA" required />
+          </div>
+          <div>
+            <label htmlFor="nr">Number</label>
+            <input id="nr" value={form.house_number} onChange={set("house_number")}
+                   placeholder="30" required />
+          </div>
+          <div>
+            <label htmlFor="ad">Addition <em>· opt.</em></label>
+            <input id="ad" value={form.house_number_addition} onChange={set("house_number_addition")}
+                   placeholder="A" />
+          </div>
+          <div className="span-2">
+            <label htmlFor="pr">Asking price € <em>· optional</em></label>
+            <input id="pr" value={form.price_eur} onChange={set("price_eur")}
+                   placeholder="650000" inputMode="numeric" />
+          </div>
+
+          <div className="span-all">
+            <button type="button" className="link-btn" style={{ padding: "4px 0" }}
+                    onClick={() => setShowOverrides(!showOverrides)}>
+              {showOverrides ? "Hide" : "Override"} built year / floor area from BAG {showOverrides ? "▲" : "▾"}
+            </button>
+          </div>
+
+          {showOverrides && (
+            <>
+              <div>
+                <label htmlFor="yr">Built</label>
+                <input id="yr" value={form.construction_year} onChange={set("construction_year")}
+                       placeholder="BAG" inputMode="numeric" />
+              </div>
+              <div>
+                <label htmlFor="ar">Area m²</label>
+                <input id="ar" value={form.living_area_m2} onChange={set("living_area_m2")}
+                       placeholder="BAG" inputMode="numeric" />
+              </div>
+            </>
+          )}
+
+          <div className="actions">
+            <button className="btn btn-primary" disabled={busy}>
+              {busy && <span className="spinner" />}{busy ? "Scoring…" : "Score address"}
+            </button>
+            <span className="hint">
+              Build year and area come from the BAG registry automatically. Price is in
+              no registry, and does not affect the score.
+            </span>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+/* ---- tabs ------------------------------------------------------------- */
+
+function ScoreTab() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [sections, setSections] = useState([]);
+  const [defaults, setDefaults] = useState(null);
+
+  // Read the calibrated weighting from the server rather than restating it
+  // here; a second copy in the front end drifts the first time it is retuned.
+  useEffect(() => {
+    fetch("/weights").then((r) => (r.ok ? r.json() : null)).then(setDefaults)
+      .catch(() => setDefaults(null));
+  }, []);
+
+  /* A re-weigh returns a HolisticScore for the same enrichment, so only the
+     score is replaced — re-running the whole result would discard the panels. */
+  const applyScore = useCallback(
+    (score) => setResult((prev) => (prev ? { ...prev, score } : prev)), []);
+
+  // Read the rendered panels rather than restating their conditions here; the
+  // nav and the page cannot then disagree about what exists.
+  useEffect(() => {
+    if (!result) { setSections([]); return; }
+    setSections(Array.from(document.querySelectorAll(".panel[id]")).map((el) => ({
+      id: el.id,
+      label: el.dataset.nav || el.querySelector("h2")?.textContent || el.id,
+    })));
+  }, [result]);
+
+  const active = useScrollSpy(sections.map((s) => s.id));
+
+  return (
+    <div className={result ? "layout" : undefined}>
+      {result && <Rail sections={sections} active={active} />}
+      <div>
+        <SearchCard busy={busy} onBusy={setBusy} onResult={setResult} onError={setError} />
+
+        {error && <div className="banner banner-bad" role="alert"><div>{error}</div></div>}
+        {busy && <ResultSkeleton />}
+        {!busy && !result && !error && <Welcome defaults={defaults} />}
+
+        {result && (
+          <>
+            <Verdict data={result} defaults={defaults} onScore={applyScore} />
+            <ThisHomePanel listing={result.listing} building={result.building}
+                           enrichment={result.enrichment} />
+            <DemographyPanel demo={result.enrichment?.demographics?.payload} />
+            <CrimePanel crime={result.enrichment?.crime?.payload} />
+            <NearbyPanel geo={result.enrichment?.geo}
+                         propertyId={result.listing.property_id} />
+            <CommutePanel postcode={result.listing.postal_code}
+                          houseNumber={result.listing.house_number}
+                          addition={result.listing.house_number_addition} />
+            <RenovationPanel building={result.building} />
+            <MarketPanel market={result.market} />
+            <WozPanel woz={result.woz} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Start a watch-loop cycle from the browser.
+ *
+ *  The same work as `uv run woonagent --once`, so the shortlist can be filled
+ *  without a terminal. A cycle runs for minutes — up to 25 listings, each with
+ *  a politeness pause and about a dozen enrichment calls — so the button only
+ *  accepts the job and this polls for progress.
+ *
+ *  The server refuses a second concurrent cycle with 409 rather than queueing
+ *  it, and this reflects that instead of pretending the click worked.
+ */
+const REGIONS_KEY = "woonagent.run.regions";
+
+function RunConsole({ onFinished }) {
+  const [run, setRun] = useState(null);
+  const [error, setError] = useState(null);
+  const [regions, setRegions] = useState(() => {
+    try { return localStorage.getItem(REGIONS_KEY) || ""; } catch { return ""; }
+  });
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    try { localStorage.setItem(REGIONS_KEY, regions); } catch { /* private window */ }
+  }, [regions]);
+
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch("/run");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      setRun(body);
+      // Refresh the shortlist the moment a cycle stops, not on the next click.
+      if (wasRunning.current && !body.running) onFinished?.();
+      wasRunning.current = body.running;
+      return body.running;
+    } catch (err) {
+      setError(explain(err));
+      return false;
+    }
+  }, [onFinished]);
+
+  useEffect(() => {
+    let timer;
+    let live = true;
+    const tick = async () => {
+      const running = await poll();
+      if (!live) return;
+      timer = setTimeout(tick, running ? 1500 : 8000);
+    };
+    tick();
+    return () => { live = false; clearTimeout(timer); };
+  }, [poll]);
+
+  async function trigger() {
+    setError(null);
+    try {
+      const res = await fetch("/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regions: regions.trim() || null }),
+      });
+      const body = await res.json();
+      if (res.status === 409) throw new Error(body.detail);
+      if (!res.ok) throw new Error(detailOf(body, res.status));
+      setRun(body);
+      wasRunning.current = true;
+    } catch (err) {
+      setError(explain(err));
+    }
+  }
+
+  async function stop() {
+    setError(null);
+    try { await fetch("/run", { method: "DELETE" }); } catch { /* poll will show it */ }
+    poll();
+  }
+
+  const status = run?.status || "idle";
+  const running = !!run?.running;
+  const WORD = { idle: "Never run", running: "Running", done: "Finished",
+                 failed: "Failed", cancelled: "Cancelled" };
+
+  return (
+    <Panel title="Watch loop"
+           note="Scrape Huispedia for new listings, enrich, score, and alert on anything above your threshold. The same cycle the agent runs on a timer.">
+      <div className="fields" style={{ marginBottom: "var(--s3)" }}>
+        <div className="span-4">
+          <label htmlFor="rg">Region <em>· optional</em></label>
+          <input id="rg" value={regions} onChange={(e) => setRegions(e.target.value)}
+                 disabled={running}
+                 placeholder="e.g. Amsterdam, Amstelveen, 1018 — blank watches the whole country" />
+        </div>
+      </div>
+
+      <div className="runbar">
+        <button className="btn btn-primary" onClick={trigger} disabled={running}>
+          {running && <span className="spinner" />}
+          {running ? "Running…" : "Run one cycle"}
+        </button>
+        {running && <button className="btn btn-ghost" onClick={stop}>Stop</button>}
+        <span className={"runstate " + status}>{WORD[status] || status}</span>
+        {run?.alerts_sent != null && !running && (
+          <span className="hint">
+            {run.alerts_sent}{" "}
+            {run.alerts_enabled === false
+              ? "scored above your threshold — no Telegram configured, so nothing was sent"
+              : "alert(s) sent"}
+          </span>
+        )}
+        {run?.started_at && (
+          <span className="hint">started {run.started_at.replace("T", " ").replace("+00:00", " UTC")}</span>
+        )}
+      </div>
+
+      {error && <p className="err" role="alert">{error}</p>}
+      {run?.error && <p className="err">{run.error}</p>}
+
+      {run?.log?.length > 0 && (
+        <div className="runlog" aria-live="polite">{run.log.join("\n")}</div>
+      )}
+
+      <p className="footnote">
+        One cycle at a time — a second request is refused rather than queued, because
+        two concurrent cycles would double the load on every upstream API. Runs in this
+        server process, so it stops if the server stops. For continuous monitoring use
+        {" "}<code>uv run woonagent</code> instead, which polls every 5–15 minutes.
+        {" "}Leaving the region blank watches every listing in the Netherlands — set one
+        before relying on this unattended, or set <code>WOONAGENT_REGIONS</code> for the
+        continuous daemon.
+      </p>
+    </Panel>
+  );
+}
+
+const COMPARE_DIMENSIONS = Object.keys(LABEL);
+
+/** Side by side, everything scored so far in this browser.
+ *
+ *  Deliberately client-side and localStorage-backed, like the commute
+ *  destinations: there is no server concept of "the addresses this visitor is
+ *  weighing up", and building one would mean accounts for a personal tool
+ *  that otherwise has none. Scoring an address again always overwrites the
+ *  same slot (keyed on property_id), so re-scoring after moving a weight
+ *  slider keeps the comparison current instead of piling up duplicates.
+ */
+function CompareTab() {
+  const [rows, setRows] = useState(() => loadCompareList());
+
+  function remove(propertyId) {
+    const next = rows.filter((r) => r.property_id !== propertyId);
+    setRows(next);
+    saveCompareList(next);
+  }
+
+  function clearAll() {
+    setRows([]);
+    saveCompareList([]);
+  }
+
+  if (rows.length === 0) {
+    return (
+      <Panel title="Compare"
+             note="Score two or more addresses on the Score tab, then use “Add to comparison” to see them side by side here.">
+        <p className="empty">Nothing to compare yet.</p>
+      </Panel>
+    );
+  }
+
+  const bestScore = Math.max(...rows.map((r) => r.total_score));
+  const bestByDim = Object.fromEntries(COMPARE_DIMENSIONS.map((key) => [
+    key, Math.max(...rows.map((r) =>
+      r.dimensions.find((d) => d.dimension === key)?.score ?? -Infinity)),
+  ]));
+  const flagCounts = (flags) => {
+    const by = { critical: 0, warn: 0, info: 0 };
+    for (const f of flags) if (f.severity in by) by[f.severity]++;
+    return by;
+  };
+
+  return (
+    <Panel title="Compare" scope={`${rows.length}/${MAX_COMPARE}`}
+           note="Addresses you have scored and chosen to compare. Stored in this browser only.">
+      <div className="scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th>&nbsp;</th>
+              {rows.map((r) => (
+                <th key={r.property_id} className="num" style={{ minWidth: 160 }}>
+                  <div style={{ fontWeight: 700, color: "var(--ink)", textTransform: "none",
+                               letterSpacing: 0, fontSize: "var(--fs-md)" }}>
+                    {r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.address}</a>
+                           : r.address}
+                  </div>
+                  <div className="facts" style={{ fontSize: "var(--fs-xs)" }}>
+                    {[r.buurt, r.gemeente].filter(Boolean).join(" · ")}
+                  </div>
+                  <button className="link-btn" onClick={() => remove(r.property_id)}
+                          style={{ marginTop: 4 }}>
+                    Remove
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Overall</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">
+                  <span className="pill" style={{ background: hue(r.total_score),
+                                                   outline: r.total_score === bestScore
+                                                     ? "2px solid var(--good)" : "none" }}>
+                    {r.total_score.toFixed(1)}
+                  </span>
+                </td>
+              ))}
+            </tr>
+            {COMPARE_DIMENSIONS.map((key) => (
+              <tr key={key}>
+                <td>{LABEL[key]}</td>
+                {rows.map((r) => {
+                  const dim = r.dimensions.find((d) => d.dimension === key);
+                  if (!dim) return <td key={r.property_id} className="num muted">—</td>;
+                  const best = dim.score === bestByDim[key] && !dim.imputed;
+                  return (
+                    <td key={r.property_id} className="num">
+                      <span style={{ color: hue(dim.score), fontWeight: best ? 700 : 500 }}>
+                        {dim.score.toFixed(1)}
+                      </span>
+                      {dim.imputed && <span className="muted"> · no data</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            <tr>
+              <td>Asking price</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">{euros(r.price_eur) || "—"}</td>
+              ))}
+            </tr>
+            <tr>
+              <td>€/m²</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">{euros(r.price_per_m2) || "—"}</td>
+              ))}
+            </tr>
+            <tr>
+              <td>Floor area</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">
+                  {r.living_area_m2 ? `${r.living_area_m2} m²` : "—"}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td>Built</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">{r.construction_year || "—"}</td>
+              ))}
+            </tr>
+            <tr>
+              <td>Energy label</td>
+              {rows.map((r) => (
+                <td key={r.property_id} className="num">{r.energy_label || "—"}</td>
+              ))}
+            </tr>
+            <tr>
+              <td>Watch out</td>
+              {rows.map((r) => {
+                const c = flagCounts(r.risk_flags);
+                const parts = [
+                  c.critical && <span key="c" style={{ color: "var(--crit)" }}>{c.critical} critical</span>,
+                  c.warn && <span key="w" style={{ color: "var(--mid)" }}>{c.warn} warning</span>,
+                  c.info && <span key="i" className="muted">{c.info} note</span>,
+                ].filter(Boolean);
+                return (
+                  <td key={r.property_id} className="num">
+                    {parts.length ? parts.reduce((a, b) => [a, " · ", b]) : <span className="muted">none</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="actions" style={{ marginTop: "var(--s4)" }}>
+        <button className="btn btn-ghost" onClick={clearAll}>Clear all</button>
+      </div>
+    </Panel>
+  );
+}
+
+//: Short display names, matching exactly what the Score tab's own dimension
+//: bars already say — a national map using different words for the same
+//: five things would read as a different scoring system.
+const MAP_DIM_LABEL = {
+  safety: "Safety", family: "Families", education: "Schools",
+  environment: "Environment", structural: "Foundation",
+};
+const MAP_DIMENSIONS = Object.keys(MAP_DIM_LABEL);
+
+/** The weighted composite for one buurt under the current sliders.
+ *
+ *  Re-normalised over whichever dimensions this buurt actually has — the
+ *  exact same rule POST /rescore applies server-side for one address,
+ *  reimplemented here in the browser because recomputing 14,000+ addresses
+ *  through a network round trip on every slider drag is not workable, and
+ *  nothing about the maths needs a server: it is a weighted average over
+ *  numbers already sitting in memory.
+ */
+function buurtComposite(properties, weights) {
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (const key of MAP_DIMENSIONS) {
+    const value = properties[key];
+    if (value == null) continue;
+    const w = weights[key] ?? 0;
+    weightedSum += w * value;
+    weightTotal += w;
+  }
+  return weightTotal > 0 ? weightedSum / weightTotal : null;
+}
+
+/** Countrywide, one composite score per CBS buurt.
+ *
+ *  Built from a completely separate pipeline (``scripts/build_national_map.py``)
+ *  and a completely separate store (DuckDB, not the personal watch-loop
+ *  SQLite database) — see that script's module docstring for why, and for the
+ *  honest, measured runtime (roughly 9 hours for the whole country; RIVM's
+ *  conservative default rate limit, not a bug, is what sets that ceiling).
+ *  The map below renders whatever fraction of the country has been scored so
+ *  far — a build in progress is still useful to look at, not just the
+ *  finished thing.
+ */
+//: The Netherlands' own bounding box, taken from PDOK's own GetCapabilities
+//: for this exact buurten dataset — not a guessed rectangle. A small margin
+//: is added so edge buurten (Zeeland, the Wadden islands) are not clipped
+//: right at the pan limit.
+const NL_BOUNDS = [[50.6, 2.9], [53.7, 7.5]];
+
+function NationalMapTab() {
+  const [geojson, setGeojson] = useState(null);
+  const [error, setError] = useState(null);
+  const [weights, setWeights] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || "null");
+      if (saved) {
+        // The Score tab stores full ScoreDimension keys; translate to this
+        // tab's short names so the same slider state is shared between them.
+        return {
+          safety: saved.physical_safety, family: saved.peer_family_concentration,
+          education: saved.education_quality_access, environment: saved.environmental_health,
+          structural: saved.structural_security,
+        };
+      }
+    } catch { /* private window, cleared storage */ }
+    return null;
+  });
+  const [defaults, setDefaults] = useState(null);
+  const mapRef = useRef(null);
+  const mapObj = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    fetch("/weights").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d) return;
+      const short = {
+        safety: d.physical_safety, family: d.peer_family_concentration,
+        education: d.education_quality_access, environment: d.environmental_health,
+        structural: d.structural_security,
+      };
+      setDefaults(short);
+      setWeights((prev) => prev || short);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch("/national-map").then(async (r) => {
+      const body = await r.json();
+      if (!r.ok) throw new Error(detailOf(body, r.status));
+      return body;
+    }).then(setGeojson).catch((err) => setError(explain(err)));
+  }, []);
+
+  const styleFor = useCallback((feature) => {
+    const composite = buurtComposite(feature.properties, weights || {});
+    return {
+      fillColor: composite == null ? "var(--muted)" : hue(composite),
+      fillOpacity: 0.75, color: "var(--line-2)", weight: 0.5,
+    };
+  }, [weights]);
+
+  // Create the map once; Leaflet owns this DOM node from here on, which is
+  // why it is a ref and not JSX — React re-rendering the div would fight
+  // Leaflet for control of its own children.
+  useEffect(() => {
+    if (!mapRef.current || mapObj.current) return;
+    const map = L.map(mapRef.current, {
+      maxBounds: NL_BOUNDS, maxBoundsViscosity: 1.0, zoomSnap: 0.25,
+      attributionControl: false,
+    });
+    // Crediting the actual source of what is drawn — CBS's boundaries via
+    // PDOK — now that there is no OpenStreetMap tile layer underneath to
+    // carry its own required attribution.
+    L.control.attribution({ prefix: "Leaflet" })
+      .addAttribution('Buurtgrenzen: <a href="https://www.cbs.nl/">CBS</a> via '
+                      + '<a href="https://www.pdok.nl/">PDOK</a>')
+      .addTo(map);
+
+    // Deliberately NO base tile layer. PDOK's own vectortile-viewer — the
+    // exact comparison this was built to match — renders only its Dutch data
+    // on a blank background; there is no world basemap sitting underneath
+    // for a neighbouring country to appear on. A raster layer like OSM
+    // covers the entire globe by definition, so however tightly the view is
+    // fit, panning or a wide viewport will always reveal Belgium or Germany
+    // sitting right there on the same tiles. The 14,668 buurt polygons
+    // already tile edge-to-edge into the country's own outline, so they are
+    // the whole picture; a plain background (see .leaflet-container's CSS)
+    // stands in for "no basemap" the same way PDOK's blank canvas does.
+    //
+    // getBoundsZoom computes the tightest zoom that still contains the whole
+    // country for THIS container's actual current size — not a fixed guess,
+    // which is exactly why one fixed value under-constrained a wider window.
+    const fitToNetherlands = () => {
+      const tightest = map.getBoundsZoom(NL_BOUNDS);
+      map.setMinZoom(tightest);
+      map.fitBounds(NL_BOUNDS);
+    };
+    fitToNetherlands();
+
+    // Refit on resize: a container that changes shape (window resize, a
+    // sidebar toggling, rotating a phone) needs a new tightest zoom, or the
+    // old one either over- or under-constrains the new shape.
+    const onResize = () => { map.invalidateSize(); fitToNetherlands(); };
+    window.addEventListener("resize", onResize);
+
+    mapObj.current = map;
+    return () => {
+      window.removeEventListener("resize", onResize);
+      map.remove();
+      mapObj.current = null;
+    };
+  }, []);
+
+  // (Re)draw the choropleth whenever the data or the weighting changes.
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !geojson) return;
+    if (layerRef.current) map.removeLayer(layerRef.current);
+
+    const layer = L.geoJSON(geojson, {
+      style: styleFor,
+      onEachFeature: (feature, lyr) => {
+        lyr.on("mouseover", () => lyr.setStyle({ weight: 2, color: "var(--accent)" }));
+        lyr.on("mouseout", () => lyr.setStyle(styleFor(feature)));
+        const p = feature.properties;
+        const composite = buurtComposite(p, weights || {});
+        const rows = MAP_DIMENSIONS.map((key) => (
+          `<div class="row"><span>${MAP_DIM_LABEL[key]}</span> <strong>${
+            p[key] != null ? p[key].toFixed(1) : "—"}</strong></div>`
+        )).join("");
+        lyr.bindPopup(
+          `<div class="natmap-popup">
+             <h3>${p.buurtnaam || p.buurtcode}</h3>
+             <div class="facts">${p.gemeentenaam || ""}</div>
+             <div class="row"><span>Overall</span> <strong>${
+               composite != null ? composite.toFixed(1) : "—"}</strong></div>
+             ${rows}
+           </div>`
+        );
+      },
+    }).addTo(map);
+    layerRef.current = layer;
+  }, [geojson, styleFor]);
+
+  const setWeight = (key) => (e) => {
+    const next = { ...(weights || {}), [key]: Number(e.target.value) };
+    setWeights(next);
+    try {
+      localStorage.setItem(WEIGHTS_KEY, JSON.stringify({
+        physical_safety: next.safety, peer_family_concentration: next.family,
+        education_quality_access: next.education, environmental_health: next.environment,
+        structural_security: next.structural,
+      }));
+    } catch { /* fine */ }
+  };
+
+  const coverage = geojson
+    ? `${nl(geojson.scored_buurten)} of ${nl(geojson.total_buurten)} buurten scored`
+      + (geojson.total_buurten ? ` (${Math.round(100 * geojson.scored_buurten / geojson.total_buurten)}%)` : "")
+    : null;
+
+  return (
+    <Panel title="National map" scope="every scored buurt"
+           note="One composite score per CBS buurt, coloured the same way as an individual address. Fills in as the batch build runs — a partial map is still real data, not a placeholder.">
+      {error && <div className="banner banner-bad" role="alert"><div>{error}</div></div>}
+
+      {geojson && (
+        <>
+          <div className="natmap-controls">
+            <div className="natmap-legend">
+              <span className="natmap-swatch" style={{ background: "var(--good)" }} /> 7+
+              <span className="natmap-swatch" style={{ background: "var(--mid)" }} /> 5–7
+              <span className="natmap-swatch" style={{ background: "var(--bad)" }} /> below 5
+              <span className="natmap-swatch" style={{ background: "var(--muted)" }} /> not yet scored
+            </div>
+            <span className="hint">{coverage}</span>
+          </div>
+
+          <div className="sliders" style={{ marginBottom: "var(--s4)" }}>
+            {MAP_DIMENSIONS.map((key) => {
+              const value = (weights || {})[key] ?? 0;
+              const total = MAP_DIMENSIONS.reduce((a, k) => a + ((weights || {})[k] ?? 0), 0);
+              const share = total > 0 ? (value / total) * 100 : 0;
+              return (
+                <div className={"slider" + (value === 0 ? " is-off" : "")} key={key}>
+                  <label htmlFor={`nm-${key}`}>{MAP_DIM_LABEL[key]}</label>
+                  <input id={`nm-${key}`} type="range" min="0" max="0.5" step="0.01"
+                         value={value} onChange={setWeight(key)} />
+                  <span className="slider-pct">{share.toFixed(0)}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <div className="natmap" ref={mapRef} />
+
+      <p className="footnote">
+        Each buurt is scored at its own centroid, run through the exact same engine as
+        scoring one address — but with no single building, so foundation risk and
+        construction year fall back to the area's own averages. This is an overview
+        for spotting promising areas, not a substitute for scoring the actual house.
+      </p>
+    </Panel>
+  );
+}
+
+function ShortlistTab() {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await fetch("/properties?limit=50");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRows(await res.json());
+    } catch (err) {
+      setError(explain(err));
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (error) return (
+    <>
+      <RunConsole onFinished={load} />
+      <div className="banner banner-bad" role="alert"><div>{error}</div></div>
+    </>
+  );
+  if (rows === null) {
+    return (
+      <section className="panel" aria-busy="true">
+        {[0, 1, 2].map((i) => <div className="sk sk-line" key={i} style={{ width: `${90 - i * 18}%` }} />)}
+      </section>
+    );
+  }
+
+  return (
+    <>
+    <RunConsole onFinished={load} />
+    <Panel title="Scored by the watch loop"
+           note="Everything the agent has found and scored, best first. Reads the local store, so it works with the agent stopped.">
+      {rows.length === 0 ? (
+        <p className="empty">
+          Nothing yet. Run <code>uv run woonagent --once</code> to populate the store.
+        </p>
+      ) : (
+        <div className="scroll-x">
+          <table>
+            <thead>
+              <tr><th>Score</th><th>Address</th><th className="num">Price</th><th className="num">m²</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.property_id}>
+                  <td>
+                    <span className="pill" style={{ background: hue(r.total_score) }}>
+                      {r.total_score.toFixed(1)}
+                    </span>
+                  </td>
+                  <td>
+                    {r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.address}</a>
+                           : r.address}
+                  </td>
+                  <td className="num">{euros(r.price_eur) || "—"}</td>
+                  <td className="num">{r.living_area_m2 || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+    </>
+  );
+}
+
+/* ---- shell ------------------------------------------------------------ */
+
+const TABS = [["score", "Score"], ["compare", "Compare"], ["list", "Shortlist"], ["map", "Map"]];
+
+function App() {
+  const [tab, setTab] = useState("score");
+  const [theme, cycleTheme] = useTheme();
+  const tabRefs = useRef({});
+
+  /* Arrow keys move between tabs, which is what a tablist is expected to do. */
+  function onTabKey(e) {
+    const i = TABS.findIndex(([id]) => id === tab);
+    const next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : null;
+    if (next == null) return;
+    e.preventDefault();
+    const [id] = TABS[(next + TABS.length) % TABS.length];
+    setTab(id);
+    tabRefs.current[id]?.focus();
+  }
+
+  return (
+    <>
+      <header className="appbar">
+        <div className="appbar-in">
+          <div className="brand">
+            <b>🏡 WoonAgent</b>
+            <span>Dutch housing intelligence</span>
+          </div>
+          <div className="tabs" role="tablist" aria-label="Views" onKeyDown={onTabKey}>
+            {TABS.map(([id, label]) => (
+              <button key={id} className="tab" role="tab" aria-selected={tab === id}
+                      tabIndex={tab === id ? 0 : -1}
+                      ref={(el) => { tabRefs.current[id] = el; }}
+                      onClick={() => setTab(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className="icon-btn" onClick={cycleTheme}
+                  title={`Theme: ${theme}`} aria-label={`Theme: ${theme}. Click to change.`}>
+            {THEME_ICON[theme]}
+          </button>
+        </div>
+      </header>
+
+      <main className="wrap" id="main">
+        <OfflineBanner />
+        {tab === "score" && <ScoreTab />}
+        {tab === "compare" && <CompareTab />}
+        {tab === "list" && <ShortlistTab />}
+        {tab === "map" && <NationalMapTab />}
+      </main>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

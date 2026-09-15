@@ -1,0 +1,74 @@
+# Fly.io deployment.
+#
+# Chosen over Railway/Render for one reason: this app's store is SQLite on
+# disk, and those platforms give a container an ephemeral filesystem. The
+# database would appear to work and then silently reset on every deploy. Fly
+# gives a real persistent volume.
+#
+# Change `app` to a name of your own — it must be globally unique on Fly, and
+# it is not the same thing as your domain.
+
+app = "woonagent"
+primary_region = "ams"          # Amsterdam: the data and the users are Dutch.
+
+[build]
+
+[env]
+  # Absolute path onto the mounted volume. Kept here as well as in the
+  # Dockerfile so it stays true if the image is ever run somewhere else.
+  WOONAGENT_DATABASE_URL = "sqlite+aiosqlite:////data/woonagent.db"
+  WOONAGENT_LOG_LEVEL = "INFO"
+  # Not a secret, so it lives here rather than in `fly secrets`. Keep this in
+  # sync with the local .env — the two are separate processes with separate
+  # config, and an empty value here means the deployed instance watches the
+  # entire country regardless of what the laptop is scoped to.
+  WOONAGENT_REGIONS = "Amsterdam,Amstelveen,Diemen,1018,1019"
+  # Same reasoning as WOONAGENT_DATABASE_URL above: the national map's DuckDB
+  # file must live on the mounted volume, not the container's own filesystem,
+  # or a build that took hours vanishes on the next deploy.
+  WOONAGENT_NATIONAL_MAP_DB_PATH = "/data/national_map.duckdb"
+
+[[mounts]]
+  source = "woonagent_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+
+  # Zero, not one. This is a personal tool that is idle most of the day, and a
+  # cold start costs a couple of seconds against a scoring request that already
+  # takes ten. Set it to 1 if you dislike the first-request delay.
+  #
+  # Consequence worth knowing: POST /run (the "Run one cycle" button) answers
+  # instantly and keeps working in the background. Once that HTTP connection
+  # closes, the machine looks idle to Fly even mid-cycle, so autostop can kill
+  # a multi-minute run partway through. Treat that button as best-effort on
+  # the deployed site; for a cycle that must actually finish, run
+  # `uv run woonagent --once` locally, or set this to 1.
+  min_machines_running = 0
+
+  # One machine only. Two would each hold their own rate limiter and their own
+  # SQLite file, so they would disagree about what has been scored and would
+  # double the load on every upstream API.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[http_service.checks]]
+  # /health is exempt from the access-token gate precisely so this works.
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  # 512 MB is comfortable: the working set is one httpx client and a small
+  # SQLite index. 256 MB also runs, but leaves little headroom for the
+  # six-provider fan-out.
+  size = "shared-cpu-1x"
+  memory = "512mb"

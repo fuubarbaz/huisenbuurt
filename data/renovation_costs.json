@@ -1,0 +1,123 @@
+{
+  "source": "Verbeterjehuis.nl (Milieu Centraal)",
+  "source_url": "https://www.verbeterjehuis.nl/",
+  "note": "National indicative figures, not a quote. Costs and subsidies vary by property, contractor and year.",
+  "measures": [
+    {
+      "measure": "gevelisolatie",
+      "title": "Gevelisolatie: verbeter je wooncomfort",
+      "url": "https://www.verbeterjehuis.nl/eigen-huis/isoleren-ventileren-en-zon-weren/gevelisolatie",
+      "category": "isoleren-ventileren-en-zon-weren",
+      "by_house_type": {
+        "terraced": {
+          "cost_eur": 800,
+          "subsidy_eur": 200,
+          "gas_saved_m3": 180,
+          "saving_eur_year": 240
+        },
+        "end_terrace": {
+          "cost_eur": 1800,
+          "subsidy_eur": 450,
+          "gas_saved_m3": 400,
+          "saving_eur_year": 575
+        },
+        "detached": {
+          "cost_eur": 2700,
+          "subsidy_eur": 700,
+          "gas_saved_m3": 600,
+          "saving_eur_year": 800
+        }
+      }
+    },
+    {
+      "measure": "vloerisolatie",
+      "title": "Vloerisolatie: warmere voeten",
+      "url": "https://www.verbeterjehuis.nl/eigen-huis/isoleren-ventileren-en-zon-weren/vloerisolatie",
+      "category": "isoleren-ventileren-en-zon-weren",
+      "by_house_type": {
+        "terraced": {
+          "cost_eur": 2150,
+          "subsidy_eur": 260,
+          "gas_saved_m3": 80,
+          "saving_eur_year": 110
+        },
+        "end_terrace": {
+          "cost_eur": 2240,
+          "subsidy_eur": 280,
+          "gas_saved_m3": 130,
+          "saving_eur_year": 180
+        },
+        "semi_detached": {
+          "cost_eur": 2900,
+          "subsidy_eur": 350,
+          "gas_saved_m3": 170,
+          "saving_eur_year": 230
+        },
+        "detached": {
+          "cost_eur": 4200,
+          "subsidy_eur": 500,
+          "gas_saved_m3": 250,
+          "saving_eur_year": 340
+        }
+      }
+    },
+    {
+      "measure": "dakisolatie",
+      "title": "Dakisolatie: minder stookkosten",
+      "url": "https://www.verbeterjehuis.nl/eigen-huis/isoleren-ventileren-en-zon-weren/dakisolatie",
+      "category": "isoleren-ventileren-en-zon-weren",
+      "by_house_type": {
+        "terraced": {
+          "cost_eur": 6000,
+          "subsidy_eur": 850,
+          "gas_saved_m3": 320,
+          "saving_eur_year": 460
+        },
+        "end_terrace": {
+          "cost_eur": 6500,
+          "subsidy_eur": 900,
+          "gas_saved_m3": 340,
+          "saving_eur_year": 480
+        },
+        "semi_detached": {
+          "cost_eur": 6500,
+          "subsidy_eur": 950,
+          "gas_saved_m3": 360,
+          "saving_eur_year": 510
+        },
+        "detached": {
+          "cost_eur": 10000,
+          "subsidy_eur": 1500,
+          "gas_saved_m3": 550,
+          "saving_eur_year": 750
+        }
+      }
+    },
+    {
+      "measure": "isolatieglas",
+      "title": "Isolatieglas: binnen lekker warm",
+      "url": "https://www.verbeterjehuis.nl/eigen-huis/isoleren-ventileren-en-zon-weren/isolatieglas",
+      "category": "isoleren-ventileren-en-zon-weren",
+      "by_house_type": {
+        "terraced": {
+          "cost_eur": 4400,
+          "subsidy_eur": 500,
+          "gas_saved_m3": 250,
+          "saving_eur_year": 350
+        },
+        "end_terrace": {
+          "cost_eur": 4700,
+          "subsidy_eur": 550,
+          "gas_saved_m3": 260,
+          "saving_eur_year": 370
+        },
+        "semi_detached": {
+          "cost_eur": 5500,
+          "subsidy_eur": 600,
+          "gas_saved_m3": 290,
+          "saving_eur_year": 400
+        }
+      }
+    }
+  ]
+}

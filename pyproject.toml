@@ -1,0 +1,55 @@
+[project]
+name = "woonagent"
+version = "0.1.0"
+description = "Real-estate intelligence engine for the Dutch buying market: monitors new listings, enriches them with Dutch public open data, scores them, and alerts."
+readme = "README.md"
+requires-python = ">=3.12"
+
+# Runtime dependencies. Lower bounds only — uv.lock is what pins the exact
+# versions, so pinning twice would just create two places to update.
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "aiosqlite>=0.20",
+    # The Phase 2 REST facade. These were briefly an optional [api] extra, on
+    # the reasoning that nothing under app/services imports them. True, but not
+    # worth it: a plain `uv sync` then silently removes them and `app.main`
+    # fails with ModuleNotFoundError. A few MB is a poor trade for a footgun.
+    # The architectural separation is enforced by imports, not by packaging.
+    # "standard" pulls uvloop and watchfiles, which --reload needs.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "duckdb>=1.5.5",
+]
+
+[project.scripts]
+woonagent = "run_agent:cli"
+woonagent-score = "scripts.score_address:cli"
+woonagent-build-index = "scripts.build_school_index:cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    # starlette's TestClient needs httpx — already a runtime dependency, so it
+    # is not repeated here.
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.setuptools]
+# The importable code is app/ plus the two top-level helpers; scripts/ is
+# included so the console entry points resolve.
+packages = ["app", "scripts"]
+py-modules = ["run_agent"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

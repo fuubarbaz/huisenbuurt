@@ -1,0 +1,22 @@
+# Keep the build context small and, more importantly, keep secrets and local
+# state out of the image.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# The local database and its journal. The deployed one lives on a volume;
+# copying this in would ship your local scrape history to the server and then
+# be shadowed by the mount anyway.
+data/woonagent.db
+data/woonagent.db-shm
+data/woonagent.db-wal
+data/*.duckdb
+
+# Secrets. Configuration on the server comes from `fly secrets`, never a file.
+.env
+
+.git/
+.gitignore
+graphify-out/
