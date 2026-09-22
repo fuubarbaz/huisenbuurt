@@ -232,6 +232,7 @@ async def index() -> dict[str, Any]:
             "GET /health": "liveness check",
             "GET /properties": "shortlist of everything scored so far",
             "GET /nearby": "properties already seen near a point, by distance",
+            "GET /national-map/status": "how many buurten are scored so far",
             "GET /national-map": "every scored buurt in the country, as GeoJSON",
             "POST /run": "trigger one watch-loop cycle, optionally scoped to a region; GET /run for progress",
             "GET /geocode/suggest": "live address suggestions as you type",
@@ -467,6 +468,29 @@ async def geocode_address(id: str = Query(..., description="A suggestion id from
         return await PDOKLocatieserver(state["http"]).address_by_id(id)
     except GeocodeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/national-map/status")
+async def national_map_status() -> dict[str, Any]:
+    """How much of the country is scored — cheap, on purpose.
+
+    The landing page shows this next to the search box, and it should not
+    cost pulling the full ~7MB gzipped GeoJSON payload just to display two
+    numbers. A single COUNT query, no geometry.
+    """
+    db_path = Path(settings.national_map_db_path)
+    if not db_path.exists():
+        return {"total_buurten": 0, "scored_buurten": 0}
+
+    def read() -> dict[str, int]:
+        store = NationalMapStore(db_path, read_only=True)
+        try:
+            counts = store.counts()
+        finally:
+            store.close()
+        return {"total_buurten": counts["total"], "scored_buurten": counts["scored"]}
+
+    return await asyncio.to_thread(read)
 
 
 @app.get("/national-map")

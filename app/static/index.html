@@ -351,6 +351,58 @@
   .flag.warn .flag-sev { color: var(--mid); }
   .flag.info .flag-sev { color: var(--accent); }
 
+  /* ---- landing hero -------------------------------------------------------- */
+  .hero { text-align: center; padding: var(--s6) var(--s4) var(--s5); }
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs);
+    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--line);
+    border-radius: var(--r-pill); padding: 3px 12px; margin-bottom: var(--s4);
+    font-weight: 600; letter-spacing: .02em;
+  }
+  .hero h1 {
+    font-size: clamp(28px, 4.5vw, 42px); line-height: 1.15; letter-spacing: -0.02em;
+    margin: 0 0 var(--s3); font-weight: 700;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub { color: var(--muted); font-size: var(--fs-lg); max-width: 56ch;
+              margin: 0 auto var(--s5); }
+  .hero-stats {
+    display: flex; justify-content: center; gap: var(--s6); flex-wrap: wrap;
+    margin: var(--s5) 0 0; padding-top: var(--s5); border-top: 1px solid var(--line);
+  }
+  .hero-stat-v { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.01em; }
+  .hero-stat-k { font-size: var(--fs-sm); color: var(--muted); margin-top: 2px; }
+  .hero-map-link {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: var(--s4);
+    font-size: var(--fs-md); font-weight: 600; color: var(--accent);
+    background: none; border: 0; cursor: pointer; padding: 4px;
+  }
+  .hero-map-link:hover { text-decoration: underline; }
+
+  /* ---- persona cards -------------------------------------------------------- */
+  .personas {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--s4); margin: var(--s5) 0;
+  }
+  .persona {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: var(--s5); box-shadow: var(--shadow-sm);
+  }
+  .persona-icon { font-size: 22px; line-height: 1; margin-bottom: var(--s3); }
+  .persona h3 { font-size: var(--fs-lg); margin: 0 0 var(--s2); letter-spacing: -.01em; }
+  .persona p { color: var(--muted); font-size: var(--fs-md); margin: 0 0 var(--s3); }
+  .persona-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .persona-tag {
+    font-size: var(--fs-xs); color: var(--ink-2); background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: var(--r-pill); padding: 2px 9px;
+  }
+
+  /* ---- at-a-glance strip ----------------------------------------------------- */
+  .glance {
+    display: flex; gap: var(--s6); flex-wrap: wrap; margin: var(--s4) 0 var(--s5);
+    padding: var(--s4) 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+
   /* ---- guided fix callout ------------------------------------------------- */
   .fixit {
     border: 1px solid var(--accent); background: var(--accent-soft);
@@ -1621,8 +1673,21 @@ function useInCompareList(propertyId) {
 }
 
 function Verdict({ data, defaults, onScore }) {
-  const { listing, score, enrichment } = data;
+  const { listing, score, enrichment, building, woz } = data;
   const geo = enrichment?.geo;
+
+  // The "at a glance" trio — the three facts most people actually reach for
+  // first, each carrying exactly where it's scoped so nothing reads as more
+  // precise than it is: WOZ in particular is the buurt's own average, never
+  // this address's own figure, because no open source publishes that (see
+  // the WOZ panel's own note below for the full reasoning).
+  const lbm = enrichment?.leefbaarometer?.usable ? enrichment.leefbaarometer.payload : null;
+  const latestWoz = woz?.points?.length ? woz.points[woz.points.length - 1] : null;
+  const glance = [
+    building?.energy_label && { label: "Energy label", value: building.energy_label, src: "EP-Online" },
+    latestWoz && { label: `Area WOZ · ${latestWoz.year}`, value: kEuros(latestWoz.value_eur), src: "CBS, area average" },
+    lbm?.klasse && { label: "Livability", value: lbm.klasse, src: "Leefbaarometer · 100m" },
+  ].filter(Boolean);
   const facts = [
     euros(listing.price_eur),
     listing.living_area_m2 && `${listing.living_area_m2} m²`,
@@ -1671,6 +1736,17 @@ function Verdict({ data, defaults, onScore }) {
           </div>
         </div>
       </div>
+
+      {glance.length > 0 && (
+        <div className="glance">
+          {glance.map((g) => (
+            <div key={g.label}>
+              <div className="stat-v sm">{g.value}</div>
+              <div className="stat-k">{g.label} <em className="src">{g.src}</em></div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="dims">
         {score.dimensions.map((d) => <Dimension key={d.dimension} dim={d} />)}
@@ -1789,13 +1865,71 @@ const SOURCES = ["PDOK Locatieserver", "BAG", "CBS StatLine", "Politie Open Data
 
 /** The first screen. An empty page with two forms on it says nothing about
  *  what the tool measures or where the numbers come from. */
+//: The three ways people actually arrive here, each pointing at real panels
+//: this app already renders — nothing here is aspirational copy for a
+//: feature that does not exist yet.
+const PERSONAS = [
+  { icon: "\u{1F3E0}", title: "Buying a house",
+    body: "The five-dimension score, nearby comparables from properties already scanned, and an energy-renovation cost estimate — before you make an offer.",
+    tags: ["Compare tab", "Nearby comparables", "Renovation cost"] },
+  { icon: "\u{1F4CD}", title: "Judging a neighbourhood",
+    body: "Safety, family fit, school access, noise and air quality — per buurt, or the whole country at once on the map.",
+    tags: ["National map", "Recorded crime", "Who lives here"] },
+  { icon: "\u{1F50D}", title: "Checking your own home",
+    body: "Energy label, foundation and flood risk, and how your area's WOZ valuation has moved — set against its own buurt average, not a guess.",
+    tags: ["This home", "WOZ valuation", "Foundation risk"] },
+];
+
+function Hero({ stats, onExploreMap }) {
+  const pct = stats?.total_buurten
+    ? Math.round(100 * stats.scored_buurten / stats.total_buurten) : null;
+  return (
+    <div className="hero">
+      <span className="hero-eyebrow">Free · Official Dutch open data · No account</span>
+      <h1>Know if a house is<br /><span>actually a good place to live</span></h1>
+      <p className="hero-sub">
+        Five weighted dimensions — safety, family fit, schools, environment, foundation —
+        computed from public data, with the numbers behind every score shown, not hidden.
+      </p>
+      <div className="hero-stats">
+        <div><div className="hero-stat-v">5</div><div className="hero-stat-k">weighted dimensions</div></div>
+        <div><div className="hero-stat-v">9</div><div className="hero-stat-k">public data sources</div></div>
+        <div>
+          <div className="hero-stat-v">{stats ? nl(stats.scored_buurten) : "…"}</div>
+          <div className="hero-stat-k">
+            {pct != null ? `of ${nl(stats.total_buurten)} buurten scored (${pct}%)` : "buurten scored"}
+          </div>
+        </div>
+      </div>
+      <div>
+        <button type="button" className="hero-map-link" onClick={onExploreMap}>
+          Or explore the national map →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Welcome({ defaults }) {
   const rows = Object.entries(defaults || {});
   const peak = Math.max(0.01, ...rows.map(([, w]) => w));
 
   return (
-    <Panel title="What this scores"
-           note="Five weighted dimensions, each computed from public Dutch open data and shown with the numbers behind it. Score an address and you can reweigh them to suit what you actually care about. Nothing here is a valuation; it is a habitability read on the address.">
+    <>
+      <div className="personas">
+        {PERSONAS.map((p) => (
+          <div className="persona" key={p.title}>
+            <div className="persona-icon">{p.icon}</div>
+            <h3>{p.title}</h3>
+            <p>{p.body}</p>
+            <div className="persona-tags">
+              {p.tags.map((t) => <span className="persona-tag" key={t}>{t}</span>)}
+            </div>
+          </div>
+        ))}
+      </div>
+    <Panel title="How the score is weighted"
+           note="Score an address below and you can reweigh these to suit what you actually care about. Nothing here is a valuation; it is a habitability read on the address.">
       <div className="weights">
         {rows.map(([key, w]) => (
           <div className="weight" key={key}>
@@ -1813,6 +1947,7 @@ function Welcome({ defaults }) {
         {SOURCES.map((s) => <span className="source-tag" key={s}>{s}</span>)}
       </div>
     </Panel>
+    </>
   );
 }
 
@@ -2117,18 +2252,26 @@ function SearchCard({ busy, onBusy, onResult, onError }) {
 
 /* ---- tabs ------------------------------------------------------------- */
 
-function ScoreTab() {
+function ScoreTab({ onExploreMap }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [sections, setSections] = useState([]);
   const [defaults, setDefaults] = useState(null);
+  const [mapStats, setMapStats] = useState(null);
 
   // Read the calibrated weighting from the server rather than restating it
   // here; a second copy in the front end drifts the first time it is retuned.
   useEffect(() => {
     fetch("/weights").then((r) => (r.ok ? r.json() : null)).then(setDefaults)
       .catch(() => setDefaults(null));
+  }, []);
+
+  // A cheap counts-only call — the landing hero's stat, never the full
+  // multi-MB national-map payload just to show two numbers.
+  useEffect(() => {
+    fetch("/national-map/status").then((r) => (r.ok ? r.json() : null)).then(setMapStats)
+      .catch(() => setMapStats(null));
   }, []);
 
   /* A re-weigh returns a HolisticScore for the same enrichment, so only the
@@ -2152,6 +2295,8 @@ function ScoreTab() {
     <div className={result ? "layout" : undefined}>
       {result && <Rail sections={sections} active={active} />}
       <div>
+        {!busy && !result && !error && <Hero stats={mapStats} onExploreMap={onExploreMap} />}
+
         <SearchCard busy={busy} onBusy={setBusy} onResult={setResult} onError={setError} />
 
         {error && <div className="banner banner-bad" role="alert"><div>{error}</div></div>}
@@ -2838,7 +2983,7 @@ function App() {
 
       <main className="wrap" id="main">
         <OfflineBanner />
-        {tab === "score" && <ScoreTab />}
+        {tab === "score" && <ScoreTab onExploreMap={() => setTab("map")} />}
         {tab === "compare" && <CompareTab />}
         {tab === "list" && <ShortlistTab />}
         {tab === "map" && <NationalMapTab />}

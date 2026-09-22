@@ -16,6 +16,12 @@ class FakeStore:
     def __init__(self, path, read_only=False):
         pass
 
+    def counts(self):
+        return {"total": 14668, "scored": 65}
+
+    def close(self):
+        pass
+
     def as_geojson(self):
         return {"type": "FeatureCollection", "features": [{"fake": True}],
                 "total_buurten": 14668, "scored_buurten": 65}
@@ -64,3 +70,27 @@ def test_the_response_is_gzip_compressible(client, monkeypatch, tmp_path):
 
     response = client.get("/national-map", headers={"Accept-Encoding": "gzip"})
     assert response.status_code == 200
+
+
+# -- GET /national-map/status ------------------------------------------------
+
+
+def test_status_reports_zero_when_no_database_exists(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(main_module.settings, "national_map_db_path", str(tmp_path / "absent.duckdb"))
+
+    response = client.get("/national-map/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"total_buurten": 0, "scored_buurten": 0}
+
+
+def test_status_reads_counts_without_the_full_geojson(client, monkeypatch, tmp_path):
+    db_path = tmp_path / "present.duckdb"
+    db_path.write_text("")
+    monkeypatch.setattr(main_module.settings, "national_map_db_path", str(db_path))
+    monkeypatch.setattr(main_module, "NationalMapStore", FakeStore)
+
+    response = client.get("/national-map/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"total_buurten": 14668, "scored_buurten": 65}
