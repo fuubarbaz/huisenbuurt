@@ -2685,9 +2685,21 @@ function NationalMapTab() {
     return null;
   });
   const [defaults, setDefaults] = useState(null);
+  const [gemeenteFilter, setGemeenteFilter] = useState("");   // "" = every municipality
+  const [minScore, setMinScore] = useState(0);                // 0 = no floor
   const mapRef = useRef(null);
   const mapObj = useRef(null);
   const layerRef = useRef(null);
+  const fitNLRef = useRef(() => {});
+
+  // Every municipality actually present in the data, not a hardcoded list —
+  // CBS occasionally merges or renames one, and this can never drift out of
+  // sync with what the map is showing.
+  const gemeenteOptions = useMemo(() => {
+    if (!geojson) return [];
+    const names = new Set(geojson.features.map((f) => f.properties.gemeentenaam).filter(Boolean));
+    return [...names].sort((a, b) => a.localeCompare(b, "nl"));
+  }, [geojson]);
 
   useEffect(() => {
     fetch("/weights").then((r) => (r.ok ? r.json() : null)).then((d) => {
@@ -2717,6 +2729,21 @@ function NationalMapTab() {
       fillOpacity: 0.75, color: "var(--line-2)", weight: 0.5,
     };
   }, [weights]);
+
+  // A buurt passes if it is in the chosen municipality (or none is chosen)
+  // AND its LIVE composite under the current sliders clears the floor.
+  // Re-evaluated against `weights`, not the stored dimension values alone —
+  // "score 7+" has to mean 7+ under what you just told it matters, or the
+  // score filter and the weight sliders would silently disagree with each
+  // other on the same map.
+  const passesFilter = useCallback((properties) => {
+    if (gemeenteFilter && properties.gemeentenaam !== gemeenteFilter) return false;
+    if (minScore > 0) {
+      const composite = buurtComposite(properties, weights || {});
+      if (composite == null || composite < minScore) return false;
+    }
+    return true;
+  }, [gemeenteFilter, minScore, weights]);
 
   // Create the map once; Leaflet owns this DOM node from here on, which is
   // why it is a ref and not JSX — React re-rendering the div would fight
@@ -2754,6 +2781,7 @@ function NationalMapTab() {
       map.setMinZoom(tightest);
       map.fitBounds(NL_BOUNDS);
     };
+    fitNLRef.current = fitToNetherlands;
     fitToNetherlands();
 
     // Refit on resize: a container that changes shape (window resize, a
@@ -2770,13 +2798,17 @@ function NationalMapTab() {
     };
   }, []);
 
-  // (Re)draw the choropleth whenever the data or the weighting changes.
+  // (Re)draw the choropleth whenever the data, the weighting, or a filter
+  // changes. Leaflet's own `filter` option — not hiding features with CSS —
+  // so a filtered-out buurt is never in the DOM to hit, hover, or slow down
+  // rendering; with 14,668 polygons that difference is not cosmetic.
   useEffect(() => {
     const map = mapObj.current;
     if (!map || !geojson) return;
     if (layerRef.current) map.removeLayer(layerRef.current);
 
     const layer = L.geoJSON(geojson, {
+      filter: (feature) => passesFilter(feature.properties),
       style: styleFor,
       onEachFeature: (feature, lyr) => {
         lyr.on("mouseover", () => lyr.setStyle({ weight: 2, color: "var(--accent)" }));
@@ -2799,7 +2831,18 @@ function NationalMapTab() {
       },
     }).addTo(map);
     layerRef.current = layer;
-  }, [geojson, styleFor]);
+
+    // A municipality filter re-frames to just that area; clearing it goes
+    // back to the whole-country fit. A score-only filter (no municipality)
+    // leaves the framing alone — narrowing by score can scatter matches
+    // right across the country, where re-fitting to their bounds would
+    // often just zoom back out to roughly the same national view anyway.
+    if (gemeenteFilter && layer.getLayers().length > 0) {
+      map.fitBounds(layer.getBounds(), { maxZoom: 12 });
+    } else if (!gemeenteFilter) {
+      fitNLRef.current();
+    }
+  }, [geojson, styleFor, passesFilter, gemeenteFilter]);
 
   const setWeight = (key) => (e) => {
     const next = { ...(weights || {}), [key]: Number(e.target.value) };
@@ -2818,6 +2861,12 @@ function NationalMapTab() {
       + (geojson.total_buurten ? ` (${Math.round(100 * geojson.scored_buurten / geojson.total_buurten)}%)` : "")
     : null;
 
+  const visibleCount = useMemo(() => {
+    if (!geojson) return 0;
+    return geojson.features.filter((f) => passesFilter(f.properties)).length;
+  }, [geojson, passesFilter]);
+  const filtering = gemeenteFilter || minScore > 0;
+
   return (
     <Panel title="National map" scope="every scored buurt"
            note="One composite score per CBS buurt, coloured the same way as an individual address. Fills in as the batch build runs — a partial map is still real data, not a placeholder.">
@@ -2833,6 +2882,37 @@ function NationalMapTab() {
               <span className="natmap-swatch" style={{ background: "var(--muted)" }} /> not yet scored
             </div>
             <span className="hint">{coverage}</span>
+          </div>
+
+          <div className="fields" style={{ marginBottom: "var(--s3)" }}>
+            <div className="span-3">
+              <label htmlFor="nm-gemeente">Municipality</label>
+              <select id="nm-gemeente" value={gemeenteFilter}
+                      onChange={(e) => setGemeenteFilter(e.target.value)}>
+                <option value="">All municipalities</option>
+                {gemeenteOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div className="span-3">
+              <label htmlFor="nm-minscore">
+                Minimum overall score <em>· {minScore === 0 ? "any" : minScore.toFixed(1)}</em>
+              </label>
+              <input id="nm-minscore" type="range" min="0" max="9" step="0.5"
+                     value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+            </div>
+            <div className="actions" style={{ marginTop: 0 }}>
+              <span className="hint">
+                {filtering
+                  ? `Showing ${nl(visibleCount)} of ${nl(geojson.features.length)} scored buurten`
+                  : `${nl(geojson.features.length)} buurten shown`}
+              </span>
+              {filtering && (
+                <button type="button" className="link-btn"
+                        onClick={() => { setGemeenteFilter(""); setMinScore(0); }}>
+                  Clear filters
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="sliders" style={{ marginBottom: "var(--s4)" }}>
